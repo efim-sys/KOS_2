@@ -1,10 +1,5 @@
-#include <vector>   
-
-#define ELEMENT_BUTTON 0
-#define ELEMENT_TEXT   1
-#define ELEMENT_IMAGE  2
-#define ELEMENT_SWITCH 3  
-#define ELEMENT_SCROLLER 4
+#include "KOS/KOS.h"
+#include "KUI.h"
 
 namespace KUI {
 
@@ -90,33 +85,6 @@ namespace KUI {
     };
 
     uint16_t wifi_colors[] = {TFT_LIGHTGRAY, TFT_BLUE};
-
-    struct Element {
-        int8_t type = 0;
-
-        String text;
-        uint16_t* image;
-        uint16_t color = TFT_MAGENTA;
-
-        const lgfx::v1::GFXfont* font = &fonts::DejaVu18;
-
-        void (*onClick)() = NULL;
-
-        bool virtualSwitch = false;
-
-        bool *switchPointer = NULL;
-
-        Element(int8_t _type, String _text, uint16_t* _image, uint16_t _color, void (*_onClick)(), const lgfx::v1::GFXfont* _font = &fonts::DejaVu18, bool* swPtr = NULL ) {
-            type = _type;
-            text = _text;
-            image = _image;
-            color = _color;
-            font = _font;
-            onClick = _onClick;
-            switchPointer = swPtr;
-            if(switchPointer!=NULL) virtualSwitch = *switchPointer;
-        }
-    };
 
     std::vector<Element> window;
 
@@ -326,7 +294,7 @@ namespace KUI {
         KOS::onKeyRelease(BTN_DOWN, [](uint8_t k) {KUI::scrollVelocity = 0;});
     }
 
-    void terminateWindow(bool resetPosition = true) {
+    void terminateWindow(bool resetPosition) {
         vTaskDelete(taskHandleScreenUpdate);
         KOS::detachAllKeys();
         if(resetPosition) {

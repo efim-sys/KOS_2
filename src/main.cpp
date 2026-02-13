@@ -1,12 +1,5 @@
-#define KOROBOCHKA3
-#define IPS169
-// #define DEBUG_MODE
-
-#include <Arduino.h>
-#include "KOS.h"
-#include "KUI.h"
-
-#include "WiFi.h"
+#include "KOS/KOS.h"
+#include "KUI/KUI.h"
 
 // Include Apps here:
 
@@ -14,19 +7,16 @@
 #include "infinite_bunner/main.h"
 #include "WeChat/main.h"
 #include "preference/main.h"
-#include "video/main.h"
-#include "3D/main.h"
 #include "korobochka_commander/main.h"
 #include "zmeyka/main.h"
 #include "StopWatch/main.h"
 #include "doom/main.h"
 #include "robot_control/main.h"
 #include "flappy_bird/main.h"
-#include "battleship/main.h"
 #include "watch/main.h"
 #include "cardReader/main.h"
 #include "remote/main.h"
-#include "BLE_MOUSE/main.h"
+#include "launcher/main.h"
 
 
 // #include "calculator/main.h"
@@ -84,6 +74,8 @@ void setup() {
     
     USB.begin();
 
+    
+
   #endif
 
   USBSerial.begin();
@@ -117,17 +109,18 @@ void setup() {
     #endif
     // Application{"Battleship",      &BattleShip::init, infinite_bunner::logo}, 
     {"Preferences", &preference::init, TFT_SKYBLUE},
-    {"Korobka commander", &korobochka_commander::init, TFT_SKYBLUE},
+    {"Korobka commander", &commander_init, TFT_SKYBLUE},
     {"Zmeyka", &zmeyka::init, TFT_LIGHTGRAY},
     {"StopWatch", &stopWatch::init, TFT_ORANGE},
     // Application{"Video", &video::init, NULL},
     {"Calendar", &calendar::init, TFT_ORANGE},
-    {"BLUETOOTH moudse", &BLE_MOUSE::init, TFT_PINK},
+    // {"BLUETOOTH moudse", &BLE_MOUSE::init, TFT_PINK},
     {"WeChat", &WeChat::init, TFT_PURPLE},
     {"DooM", &doom::init, TFT_RED},
     // {"Robot", &robot_control::init, NULL},
     {"CardReader mode", &cardReader::init, TFT_SKYBLUE},
     {"TV remote", &TVremote::init, TFT_MAROON},
+    {"Launcher", &launcher::init, TFT_RED},
   };
   if(KOS::extRTC_IN) {  
     apps.insert(apps.begin()+8, 
@@ -159,11 +152,12 @@ void setup() {
   
 }
 
+
 void loop() {
-  USBSerial.println("App selected!");
+  
 
   xSemaphoreTake(appSelected, portMAX_DELAY);
-
+  USBSerial.println("App selected!");
   int choosedApp;
 
   choosedApp = KUI::activeElement;

@@ -1,5 +1,0 @@
-namespace kCalc {
-    void init() {
-        
-    }
-}

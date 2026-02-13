@@ -445,7 +445,7 @@ namespace doom {
     void main(void * arg) {
         KOS::initSPIFFS();
         uint32_t texw, texh;
-        T1488 =  (lgfx::rgb565_t*) KOS::readImageBmp(SPIFFS, "/1488.bmp", &texw, &texh);
+        // T1488 =  (lgfx::rgb565_t*) KOS::readImageBmp(SPIFFS, "/1488.bmp", &texw, &texh);
         Twall =  (lgfx::rgb565_t*) KOS::readImageBmp(SPIFFS, "/wall.bmp", &texw, &texh);
         Tbird =  (lgfx::rgb565_t*) KOS::readImageBmp(SPIFFS, "/bird.bmp", &texw, &texh);
 
@@ -456,15 +456,15 @@ namespace doom {
         };
         // enemies[0].textures[0] = KOS::readImageBmp(SPIFFS, "/guard-walk1.bmp");
 
-        applyNtohs(T1488);
+        // applyNtohs(T1488);
         applyNtohs(Twall);
         applyNtohs(Tbird);        
 
         area = {
-            {{1, Twall}, {1, Tbird}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, T1488}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}},
-            {{1, T1488}, {0}, {0},  {1,Twall}, {0}, {0}, {0}, {0}, {0}, {1, Twall}, {0}, {0}, {0}, {1, Twall}},
+            {{1, Twall}, {1, Tbird}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}},
             {{1, Twall}, {0}, {0},  {1,Twall}, {0}, {0}, {0}, {0}, {0}, {1, Twall}, {0}, {0}, {0}, {1, Twall}},
-            {{1, Twall}, {0}, {0},  {1,Twall}, {0}, {0}, {1, T1488}, {0}, {0}, {1, Twall}, {0}, {0}, {0}, {1, Twall}},
+            {{1, Twall}, {0}, {0},  {1,Twall}, {0}, {0}, {0}, {0}, {0}, {1, Twall}, {0}, {0}, {0}, {1, Twall}},
+            {{1, Twall}, {0}, {0},  {1,Twall}, {0}, {0}, {1, Twall}, {0}, {0}, {1, Twall}, {0}, {0}, {0}, {1, Twall}},
             {{1, Twall}, {0}, {0},  {1,Twall}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {1, Twall}},
             {{1, Twall}, {0}, {0}, {1, Twall}, {0}, {0}, {0}, {0}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}, {1, Twall}},
             {{1, Twall}, {0}, {0}, {1, Twall}, {0}, {0}, {0}, {0}, {1, Twall}},
