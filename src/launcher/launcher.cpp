@@ -1,8 +1,7 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
+#include "main.h"
+#include "KOS/KOS.h"
 #include <elf.h>
+#include "export.h"
 
 // Определения для Xtensa (ESP32)
 #define R_XTENSA_NONE           0
@@ -39,6 +38,8 @@
 
 #define MAX_SECTIONS 50
 #define MAX_SYMBOLS 1000
+
+
 
 typedef struct {
     uint8_t *data;           // Указатель на данные секции в памяти (выделено malloc)
@@ -92,13 +93,16 @@ const char* get_section_type_name(uint32_t type);
 int should_load_section(Elf32_Shdr *shdr);
 int is_relocation_section(Elf32_Shdr *shdr);
 void print_separator(int length);
+int is_metadata_section(const char *name, Elf32_Shdr *shdr);
+int find_section_by_name(ELFContext *ctx, const char *name);
+SectionBuffer* find_section_by_index(ELFContext *ctx, int index);
 
-// Вспомогательная функция для печати разделителя
+
 void print_separator(int length) {
     for (int i = 0; i < length; i++) {
-        printf("-");
+        USBSerial.printf("-");
     }
-    printf("\n");
+    USBSerial.printf("\n");
 }
 
 const char* get_section_type_name(uint32_t type) {
@@ -129,31 +133,74 @@ int is_relocation_section(Elf32_Shdr *shdr) {
     return (shdr->sh_type == SHT_RELA || shdr->sh_type == SHT_REL);
 }
 
+int is_metadata_section(const char *name, Elf32_Shdr *shdr) {
+    // Проверяем, является ли секция метаданными (не загружаемыми в память выполнения)
+    if (shdr->sh_type == SHT_SYMTAB ||
+        shdr->sh_type == SHT_STRTAB ||
+        shdr->sh_type == SHT_RELA ||
+        shdr->sh_type == SHT_REL) {
+        return 1;
+    }
+    
+    // Проверяем по имени
+    if (name == NULL) return 0;
+    
+    if (strstr(name, ".rela") == name || 
+        strstr(name, ".rel") == name ||
+        strstr(name, ".symtab") ||
+        strstr(name, ".strtab") ||
+        strstr(name, ".shstrtab") ||
+        strstr(name, ".comment") ||
+        strstr(name, ".debug") ||
+        strstr(name, ".note") ||
+        strstr(name, ".xtensa.info")) {
+        return 1;
+    }
+    
+    return 0;
+}
+
+int find_section_by_name(ELFContext *ctx, const char *name) {
+    for (int i = 0; i < ctx->section_count; i++) {
+        if (strcmp(ctx->sections[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+SectionBuffer* find_section_by_index(ELFContext *ctx, int index) {
+    if (index >= 0 && index < ctx->section_count) {
+        return &ctx->sections[index];
+    }
+    return NULL;
+}
+
 int parse_elf(const char *filename, ELFContext *ctx) {
     // Открываем файл
     ctx->file = fopen(filename, "rb");
     if (!ctx->file) {
-        perror("Failed to open file");
+        USBSerial.printf("Failed to open file");
         return -1;
     }
 
     // Читаем ELF заголовок
     if (fread(&ctx->elf_header, sizeof(Elf32_Ehdr), 1, ctx->file) != 1) {
-        fprintf(stderr, "Failed to read ELF header\n");
+        USBSerial.printf("Failed to read ELF header\n");
         fclose(ctx->file);
         return -1;
     }
 
     // Проверяем магические числа
     if (memcmp(ctx->elf_header.e_ident, ELFMAG, SELFMAG) != 0) {
-        fprintf(stderr, "Not a valid ELF file\n");
+        USBSerial.printf("Not a valid ELF file\n");
         fclose(ctx->file);
         return -1;
     }
 
     // Проверяем архитектуру (должна быть Xtensa)
     if (ctx->elf_header.e_machine != 0x5E && ctx->elf_header.e_machine != 94) {
-        fprintf(stderr, "Not an Xtensa/ESP32 ELF file (e_machine = 0x%x)\n", ctx->elf_header.e_machine);
+        USBSerial.printf("Not an Xtensa/ESP32 ELF file (e_machine = 0x%x)\n", ctx->elf_header.e_machine);
         fclose(ctx->file);
         return -1;
     }
@@ -165,9 +212,9 @@ int parse_elf(const char *filename, ELFContext *ctx) {
     fseek(ctx->file, ctx->elf_header.e_shoff, SEEK_SET);
     
     // Выделяем память для заголовков секций
-    ctx->section_headers = malloc(ctx->elf_header.e_shnum * sizeof(Elf32_Shdr));
+    ctx->section_headers = (Elf32_Shdr*) malloc(ctx->elf_header.e_shnum * sizeof(Elf32_Shdr));
     if (!ctx->section_headers) {
-        fprintf(stderr, "Memory allocation failed\n");
+        USBSerial.printf("Memory allocation failed\n");
         fclose(ctx->file);
         return -1;
     }
@@ -175,7 +222,7 @@ int parse_elf(const char *filename, ELFContext *ctx) {
     // Читаем заголовки секций
     if (fread(ctx->section_headers, sizeof(Elf32_Shdr), 
               ctx->elf_header.e_shnum, ctx->file) != ctx->elf_header.e_shnum) {
-        fprintf(stderr, "Failed to read section headers\n");
+        USBSerial.printf("Failed to read section headers\n");
         free(ctx->section_headers);
         fclose(ctx->file);
         return -1;
@@ -183,9 +230,9 @@ int parse_elf(const char *filename, ELFContext *ctx) {
 
     // Получаем строковую таблицу для имен секций
     Elf32_Shdr *strtab_header = &ctx->section_headers[ctx->elf_header.e_shstrndx];
-    ctx->section_names = malloc(strtab_header->sh_size);
+    ctx->section_names = (char*) malloc(strtab_header->sh_size);
     if (!ctx->section_names) {
-        fprintf(stderr, "Memory allocation failed\n");
+        USBSerial.printf("Memory allocation failed\n");
         free(ctx->section_headers);
         fclose(ctx->file);
         return -1;
@@ -193,7 +240,7 @@ int parse_elf(const char *filename, ELFContext *ctx) {
 
     fseek(ctx->file, strtab_header->sh_offset, SEEK_SET);
     if (fread(ctx->section_names, 1, strtab_header->sh_size, ctx->file) != strtab_header->sh_size) {
-        fprintf(stderr, "Failed to read section names\n");
+        USBSerial.printf("Failed to read section names\n");
         free(ctx->section_names);
         free(ctx->section_headers);
         fclose(ctx->file);
@@ -227,7 +274,7 @@ int parse_elf(const char *filename, ELFContext *ctx) {
 }
 
 int load_sections_to_memory(ELFContext *ctx) {
-    printf("[LOADER] Загрузка секций в память:\n");
+    USBSerial.printf("[LOADER] Загрузка секций в память:\n");
     print_separator(60);
     
     int loaded_count = 0;
@@ -235,43 +282,60 @@ int load_sections_to_memory(ELFContext *ctx) {
     for (int i = 0; i < ctx->section_count; i++) {
         SectionBuffer *section = &ctx->sections[i];
         
-        // Загружаем только секции с флагом ALLOC
+        // Проверяем, нужно ли загружать эту секцию
+        if (is_metadata_section(section->name, &section->header)) {
+            USBSerial.printf("[SKIP] Пропускаем метаданные: '%s' (тип: %s)\n", 
+                   section->name, get_section_type_name(section->header.sh_type));
+            continue;
+        }
+        
+        // Проверяем, имеет ли секция флаг ALLOC
         if (!should_load_section(&section->header)) {
-            printf("[SKIP] Пропускаем секцию '%s' (без флага ALLOC)\n", section->name);
+            USBSerial.printf("[SKIP] Пропускаем секцию без флага ALLOC: '%s'\n", section->name);
             continue;
         }
         
         // Выделяем память для секции
-        section->data = malloc(section->size);
+        if(section->header.sh_flags & SHF_EXECINSTR) {
+            USBSerial.printf("[ALLOC] allocating %d bytes of IRAM\n", section->size);
+            section->data = (uint8_t*) heap_caps_malloc(section->size, MALLOC_CAP_EXEC);
+        }
+        else section->data = (uint8_t*) malloc(section->size);
+
         if (!section->data) {
-            fprintf(stderr, "Failed to allocate %zu bytes for section '%s'\n", 
+            USBSerial.printf("Failed to allocate %zu bytes for section '%s'\n", 
                     section->size, section->name);
             continue;
         }
+
+        USBSerial.printf("Allocated buffer at %p\nFilling it now...\n", section->data);
         
-        section->alloc_addr = section->data;  // Адрес в ОЗУ - это указатель, возвращенный malloc
-        section->is_loaded = 1;
-        
-        // Читаем данные секции из файла
-        fseek(ctx->file, section->header.sh_offset, SEEK_SET);
-        if (fread(section->data, 1, section->size, ctx->file) != section->size) {
-            fprintf(stderr, "Failed to read data for section '%s'\n", section->name);
-            free(section->data);
-            section->data = NULL;
-            section->alloc_addr = NULL;
-            section->is_loaded = 0;
-            continue;
+        // Для секций типа NOBITS (например, .bss) заполняем нулями
+        if (section->header.sh_type == SHT_NOBITS) {
+            memset(section->data, 0, section->size);
+        } else {
+            // Читаем данные секции из файла
+            fseek(ctx->file, section->header.sh_offset, SEEK_SET);
+            if (fread(section->data, 1, section->size, ctx->file) != section->size) {
+                USBSerial.printf("Failed to read data for section '%s'\n", section->name);
+                free(section->data);
+                section->data = NULL;
+                continue;
+            }
         }
         
-        printf("[LOADED] Секция: %s\n", section->name);
-        printf("         Адрес в ОЗУ: %p\n", (void*)section->alloc_addr);
-        printf("         Размер: %zu байт\n", section->size);
-        printf("         Тип: %s\n", get_section_type_name(section->header.sh_type));
-        printf("         Флаги: 0x%08x", section->header.sh_flags);
-        if (section->header.sh_flags & SHF_EXECINSTR) printf(" EXECINSTR");
-        if (section->header.sh_flags & SHF_WRITE) printf(" WRITE");
-        if (section->header.sh_flags & SHF_ALLOC) printf(" ALLOC");
-        printf("\n\n");
+        section->alloc_addr = section->data;
+        section->is_loaded = 1;
+        
+        USBSerial.printf("[LOADED] Секция: %s\n", section->name);
+        USBSerial.printf("         Адрес в ОЗУ: %p\n", (void*)section->alloc_addr);
+        USBSerial.printf("         Размер: %zu байт\n", section->size);
+        USBSerial.printf("         Тип: %s\n", get_section_type_name(section->header.sh_type));
+        USBSerial.printf("         Флаги: 0x%08x", section->header.sh_flags);
+        if (section->header.sh_flags & SHF_EXECINSTR) USBSerial.printf(" EXECINSTR");
+        if (section->header.sh_flags & SHF_WRITE) USBSerial.printf(" WRITE");
+        if (section->header.sh_flags & SHF_ALLOC) USBSerial.printf(" ALLOC");
+        USBSerial.printf("\n\n");
         
         loaded_count++;
     }
@@ -288,20 +352,20 @@ int load_symbols(ELFContext *ctx) {
         
         if (shdr->sh_type == SHT_SYMTAB) {
             char *section_name = &ctx->section_names[shdr->sh_name];
-            printf("[LOADER] Найдена таблица символов: %s (размер: %u)\n", 
+            USBSerial.printf("[LOADER] Найдена таблица символов: %s (размер: %u)\n", 
                    section_name, shdr->sh_size);
             
             // Выделяем временный буфер для таблицы символов
-            uint8_t *symtab_data = malloc(shdr->sh_size);
+            uint8_t *symtab_data = (uint8_t*) malloc(shdr->sh_size);
             if (!symtab_data) {
-                fprintf(stderr, "Failed to allocate memory for symbol table\n");
+                USBSerial.printf("Failed to allocate memory for symbol table\n");
                 return -1;
             }
             
             // Читаем таблицу символов из файла
             fseek(ctx->file, shdr->sh_offset, SEEK_SET);
             if (fread(symtab_data, 1, shdr->sh_size, ctx->file) != shdr->sh_size) {
-                fprintf(stderr, "Failed to read symbol table\n");
+                USBSerial.printf("Failed to read symbol table\n");
                 free(symtab_data);
                 return -1;
             }
@@ -311,13 +375,13 @@ int load_symbols(ELFContext *ctx) {
             
             // Получаем строковую таблицу для имен символов
             Elf32_Shdr *strtab_hdr = &ctx->section_headers[shdr->sh_link];
-            char *strtab = malloc(strtab_hdr->sh_size);
+            char *strtab = (char*)malloc(strtab_hdr->sh_size);
             if (strtab) {
                 fseek(ctx->file, strtab_hdr->sh_offset, SEEK_SET);
                 fread(strtab, 1, strtab_hdr->sh_size, ctx->file);
             }
             
-            printf("[LOADER] Загружаем символы (%u записей):\n", num_symbols);
+            USBSerial.printf("[LOADER] Загружаем символы (%u записей):\n", num_symbols);
             
             for (uint32_t j = 0; j < num_symbols && ctx->symbol_count < MAX_SYMBOLS; j++) {
                 SymbolInfo *sym = &ctx->symbols[ctx->symbol_count];
@@ -340,17 +404,17 @@ int load_symbols(ELFContext *ctx) {
             if (strtab) free(strtab);
             free(symtab_data);
             
-            printf("[LOADER] Загружено символов: %d\n", ctx->symbol_count);
+            USBSerial.printf("[LOADER] Загружено символов: %d\n", ctx->symbol_count);
             return 0;
         }
     }
     
-    printf("[LOADER] Таблица символов не найдена\n");
+    USBSerial.printf("[LOADER] Таблица символов не найдена\n");
     return -1;
 }
 
 int calculate_symbol_addresses(ELFContext *ctx) {
-    printf("[LOADER] Вычисление абсолютных адресов символов:\n");
+    USBSerial.printf("[LOADER] Вычисление абсолютных адресов символов:\n");
     print_separator(60);
     
     for (int i = 0; i < ctx->symbol_count; i++) {
@@ -359,70 +423,48 @@ int calculate_symbol_addresses(ELFContext *ctx) {
         if (sym->shndx == SHN_UNDEF) {
             // Неопределенный символ (внешний) - адрес пока неизвестен
             sym->absolute_addr = NULL;
-            printf("  %-30s: EXTERNAL (секция: UNDEF)\n", sym->name);
+            USBSerial.printf("  %-30s: EXTERNAL (секция: UNDEF)\n", sym->name);
         } else if (sym->shndx == SHN_ABS) {
             // Абсолютный символ - значение уже является адресом
             sym->absolute_addr = (uint8_t*)(uintptr_t)sym->value;
-            printf("  %-30s: ABSOLUTE (адрес: %p)\n", sym->name, (void*)sym->absolute_addr);
+            USBSerial.printf("  %-30s: ABSOLUTE (адрес: %p)\n", sym->name, (void*)sym->absolute_addr);
         } else if (sym->shndx == SHN_COMMON) {
             // COMMON символ (неинициализированные глобальные данные)
-            sym->absolute_addr = NULL;  // Зарезервируем позже
-            printf("  %-30s: COMMON (размер: 0x%08x)\n", sym->name, sym->size);
+            sym->absolute_addr = NULL;
+            USBSerial.printf("  %-30s: COMMON (размер: 0x%08x)\n", sym->name, sym->size);
+        } else if (sym->shndx >= ctx->elf_header.e_shnum) {
+            // Некорректный индекс секции
+            sym->absolute_addr = NULL;
+            USBSerial.printf("  %-30s: ERROR (некорректный индекс секции: %u)\n", 
+                   sym->name, sym->shndx);
         } else {
-            // Обычный символ: ищем его секцию в исходной таблице заголовков
-            // sym->shndx - это индекс в исходной таблице section_headers
-            if (sym->shndx < ctx->elf_header.e_shnum) {
-                Elf32_Shdr *section_hdr = &ctx->section_headers[sym->shndx];
-                char *section_name = &ctx->section_names[section_hdr->sh_name];
-                
-                // Теперь ищем эту секцию в нашем массиве загруженных секций
-                SectionBuffer *loaded_section = NULL;
-                for (int j = 0; j < ctx->section_count; j++) {
-                    if (ctx->sections[j].header.sh_offset == section_hdr->sh_offset) {
-                        loaded_section = &ctx->sections[j];
-                        break;
-                    }
+            // Обычный символ: ищем его секцию
+            Elf32_Shdr *section_hdr = &ctx->section_headers[sym->shndx];
+            char *section_name = &ctx->section_names[section_hdr->sh_name];
+            
+            // Ищем секцию в нашем массиве загруженных секций
+            SectionBuffer *loaded_section = NULL;
+            for (int j = 0; j < ctx->section_count; j++) {
+                if (ctx->sections[j].header.sh_offset == section_hdr->sh_offset) {
+                    loaded_section = &ctx->sections[j];
+                    break;
                 }
-                
-                if (loaded_section && loaded_section->is_loaded) {
-                    // Вычисляем абсолютный адрес: адрес секции в памяти + смещение в секции
-                    sym->absolute_addr = loaded_section->alloc_addr + sym->value;
-                    printf("  %-30s: %p (секция: %s, смещение: 0x%08x)\n", 
-                           sym->name, (void*)sym->absolute_addr, section_name, sym->value);
-                } else {
-                    // Секция не загружена в память - проверяем тип секции
-                    if (section_hdr->sh_type == SHT_PROGBITS || 
-                        section_hdr->sh_type == SHT_NOBITS) {
-                        // Это нормальная секция данных/кода, но она не загружена
-                        // Возможно, у нее нет флага ALLOC
-                        sym->absolute_addr = NULL;
-                        printf("  %-30s: NOT LOADED (секция %s не загружена, тип: %s)\n", 
-                               sym->name, section_name, get_section_type_name(section_hdr->sh_type));
-                    } else if (section_hdr->sh_type == SHT_SYMTAB ||
-                               section_hdr->sh_type == SHT_STRTAB ||
-                               section_hdr->sh_type == SHT_RELA ||
-                               section_hdr->sh_type == SHT_REL) {
-                        // Это служебная секция (таблица символов, строк, релокаций)
-                        // Такие секции не загружаются в память выполнения
-                        sym->absolute_addr = NULL;
-                        printf("  %-30s: METADATA (секция %s, не загружается в память)\n", 
-                               sym->name, section_name);
-                    } else {
-                        // Другой тип секции
-                        sym->absolute_addr = NULL;
-                        printf("  %-30s: UNKNOWN (секция %s, тип: 0x%08x)\n", 
-                               sym->name, section_name, section_hdr->sh_type);
-                    }
-                }
+            }
+            
+            if (loaded_section && loaded_section->is_loaded) {
+                // Вычисляем абсолютный адрес: адрес секции в памяти + смещение в секции
+                sym->absolute_addr = loaded_section->alloc_addr + sym->value;
+                USBSerial.printf("  %-30s: %p (секция: %s, смещение: 0x%08x)\n", 
+                       sym->name, (void*)sym->absolute_addr, section_name, sym->value);
             } else {
-                // Некорректный индекс секции
+                // Секция не загружена в память
                 sym->absolute_addr = NULL;
-                printf("  %-30s: ERROR (некорректный индекс секции: %u)\n", 
-                       sym->name, sym->shndx);
+                USBSerial.printf("  %-30s: NOT LOADED (секция %s не загружена)\n", 
+                       sym->name, section_name);
             }
         }
     }
-    printf("\n");
+    USBSerial.printf("\n");
     return 0;
 }
 
@@ -490,8 +532,79 @@ void decode_xtensa_instruction(uint32_t instr, uint32_t *op0, uint32_t *op1, uin
     *op2 = (instr >> 8) & 0xF;
 }
 
+
+void apply_xtensa_slot0_reloc(uint8_t *p_ptr, uint32_t target_addr) {
+    USBSerial.printf("[SKIP] xtensa slot0 relocations will be skipped for now...\n");
+    return;
+    uint32_t p = (uint32_t)p_ptr;
+    uint8_t opcode = p_ptr[0];
+    
+    USBSerial.printf("[DEBUG] Slot0 Reloc at 0x%08X (Opcode: 0x%02X)\n", p, opcode);
+
+    // Состояние ДО
+    USBSerial.printf("  Instruction before: %02X %02X %02X\n", p_ptr[0], p_ptr[1], p_ptr[2]);
+
+    int32_t offset;
+
+    // 1. L32R (Смещение 16 бит, значащие биты [16:31] инструкции, PC-relative)
+    if (opcode == 0x81) {
+        uint32_t base = (p + 3) & ~3;
+        offset = (int32_t)(target_addr - base) >> 2;
+        
+        USBSerial.printf("  Type: L32R (16-bit offset: %d !words!)\n", offset);
+        p_ptr[1] = (uint8_t)(offset & 0xFF);
+        p_ptr[2] = (uint8_t)((offset >> 8) & 0xFF);
+    }
+    
+    // 2. Условные переходы (BCC) - смещение 8 бит
+    // Примеры: BEQ, BNE, BGEU, BLTU... (Opcode обычно заканчивается на 0x7 или 0x6 в зависимости от типа)
+    else if ((opcode & 0xF) == 0x7 || (opcode & 0xF) == 0x6) {
+        offset = (int32_t)(target_addr - p);
+        
+        USBSerial.printf("  Type: Branch (8-bit offset: %d)\n", offset);
+        if (offset < -128 || offset > 127) {
+            USBSerial.printf("  [ERROR] Branch target out of 8-bit range!\n");
+        }
+        // Смещение в этих инструкциях обычно лежит во 3-м байте (p_ptr[2])
+        // p_ptr[2] = (uint8_t)(offset & 0xFF);
+        USBSerial.printf("{SKIP for now}\n");
+    }
+
+    // 3. CALL (Смещение 18 бит, сдвинутое на 2)
+    else if ((opcode & 0xF) == 0x5) {
+        offset = (int32_t)(target_addr - ((p + 4) & ~3)) >> 2;
+        
+        USBSerial.printf("  Type: CALL (18-bit offset: %d)\n", offset);
+        // Нужно упаковать 18 бит в 3-байтовую инструкцию
+        // Биты смещения распределены между байтами 0, 1 и 2
+        p_ptr[0] = (uint8_t)((opcode & 0x3F) | ((offset & 0x3) << 6));
+        p_ptr[1] = (uint8_t)((offset >> 2) & 0xFF);
+        p_ptr[2] = (uint8_t)((offset >> 10) & 0xFF);
+    }
+
+    // 4. Инструкции Density (16-битные, например BEQZ.N) - смещение 6 или 12 бит
+    else if ((opcode & 0xF) == 0xC || (opcode & 0xF) == 0xD) {
+        // Это упрощенный пример для коротких инструкций
+        offset = (int32_t)(target_addr - p - 4);
+        USBSerial.printf("  Type: Density Branch (Short offset: %d)\n", offset);
+        
+        // В 16-битных инструкциях смещение упаковано специфично для каждой
+        // Например, для BEQZ.N (Opcode 0x8C..0xCC):
+        USBSerial.printf("{SKIP for now}\n");
+        // p_ptr[1] = (p_ptr[1] & 0xF0) | ((offset >> 2) & 0x0F); // Пример упаковки
+    }
+
+    else {
+        USBSerial.printf("  [WARNING] Unknown Opcode for Slot0! Check Xtensa ISA.\n");
+    }
+
+    USBSerial.printf("  Instruction after:  %02X %02X %02X (Offset: %d bytes)\n", 
+        p_ptr[0], p_ptr[1], p_ptr[2], offset);
+}
+
 void process_relocation(Elf32_Rela *rela, SectionBuffer *target, 
                        SectionBuffer *reloc_section, ELFContext *ctx, int reloc_index) {
+                        
     uint32_t offset = rela->r_offset;
     uint32_t type = ELF32_R_TYPE(rela->r_info);
     uint32_t sym_index = ELF32_R_SYM(rela->r_info);
@@ -499,7 +612,7 @@ void process_relocation(Elf32_Rela *rela, SectionBuffer *target,
     
     // Проверяем, что смещение находится в пределах секции
     if (offset >= target->size) {
-        printf("[ERROR] Релокация #%d: смещение 0x%08x вне границ секции %s (размер: 0x%08x)\n",
+        USBSerial.printf("[ERROR] Релокация #%d: смещение 0x%08x вне границ секции %s (размер: 0x%08x)\n",
                reloc_index, offset, target->name, target->size);
         return;
     }
@@ -509,32 +622,40 @@ void process_relocation(Elf32_Rela *rela, SectionBuffer *target,
     uint32_t *location32 = (uint32_t *)location;
     uint16_t *location16 = (uint16_t *)location;
     uint8_t *location8 = (uint8_t *)location;
+
+    addend = *((int32_t*)location);
     
     uint8_t *symbol_addr = get_symbol_absolute_addr(ctx, sym_index);
     char *symbol_name = get_symbol_name(ctx, sym_index);
+
+    if(type == R_XTENSA_SLOT0_OP) {
+        // USBSerial.printf("[SKIP] R_XTENSA_SLOT0_OP will be skipped for now!");
+        return;
+    }
     
-    printf("[RELOCATION #%d]\n", reloc_index);
-    printf("  Тип: %s (%u)\n", get_relocation_type_name(type), type);
-    printf("  Секция: %s (адрес в ОЗУ: %p, размер: 0x%08zx)\n", 
+    USBSerial.printf("[RELOCATION #%d]\n", reloc_index);
+    USBSerial.printf("  Тип: %s (%u)\n", get_relocation_type_name(type), type);
+    USBSerial.printf("  Секция: %s (адрес в ОЗУ: %p, размер: 0x%08zx)\n", 
            target->name, (void*)target->alloc_addr, target->size);
-    printf("  Смещение в секции: 0x%08x\n", offset);
-    printf("  Адрес релокации в ОЗУ: %p\n", (void*)location);
-    printf("  Символ: %s (индекс: %u, адрес: %p)\n", 
+    USBSerial.printf("  Смещение в секции: 0x%08x\n", offset);
+    USBSerial.printf("  Адрес релокации в ОЗУ: %p\n", (void*)location);
+    USBSerial.printf("  Символ: %s (индекс: %u, адрес: %p)\n", 
            symbol_name, sym_index, (void*)symbol_addr);
-    printf("  Адденд: 0x%08x (%d)\n", addend, addend);
+    USBSerial.printf("  Адденд: 0x%08x (%d)\n", addend, addend);
     
     // Для неразрешенных символов (NULL) показываем предупреждение
     if (symbol_addr == NULL && sym_index != 0) {
-        printf("  ВНИМАНИЕ: Символ не разрешен (адрес = NULL). Возможно, внешняя ссылка.\n");
+        USBSerial.printf("  ВНИМАНИЕ: Символ не разрешен (адрес = NULL). Возможно, внешняя ссылка.\n");
+        return; // Не применяем релокацию для неразрешенных символов
     }
     
     switch(type) {
         case R_XTENSA_32: {
             // Абсолютная 32-битная релокация: S + A
             uint32_t value = (uint32_t)(uintptr_t)symbol_addr + addend;
-            printf("  Формула: S + A = %p + 0x%08x\n", (void*)symbol_addr, addend);
-            printf("  Результат: 0x%08x\n", value);
-            printf("  Записываем 0x%08x по адресу %p\n", 
+            USBSerial.printf("  Формула: S + A = %p + 0x%08x\n", (void*)symbol_addr, addend);
+            USBSerial.printf("  Результат: 0x%08x\n", value);
+            USBSerial.printf("  Записываем 0x%08x по адресу %p\n", 
                    value, (void*)location32);
             *location32 = value;
             break;
@@ -545,11 +666,11 @@ void process_relocation(Elf32_Rela *rela, SectionBuffer *target,
             // В Xtensa PC указывает на следующую инструкцию
             uint32_t pc = (uint32_t)(uintptr_t)location + 4; // PC указывает на следующую инструкцию
             uint32_t value = (uint32_t)(uintptr_t)symbol_addr + addend - pc;
-            printf("  PC = P + 4 = %p + 4 = 0x%08x\n", (void*)location, pc);
-            printf("  Формула: S + A - PC = %p + 0x%08x - 0x%08x\n", 
+            USBSerial.printf("  PC = P + 4 = %p + 4 = 0x%08x\n", (void*)location, pc);
+            USBSerial.printf("  Формула: S + A - PC = %p + 0x%08x - 0x%08x\n", 
                    (void*)symbol_addr, addend, pc);
-            printf("  Результат: 0x%08x\n", value);
-            printf("  Записываем 0x%08x по адресу %p\n", value, (void*)location32);
+            USBSerial.printf("  Результат: 0x%08x\n", value);
+            USBSerial.printf("  Записываем 0x%08x по адресу %p\n", value, (void*)location32);
             *location32 = value;
             break;
         }
@@ -569,15 +690,20 @@ void process_relocation(Elf32_Rela *rela, SectionBuffer *target,
         case R_XTENSA_SLOT12_OP:
         case R_XTENSA_SLOT13_OP:
         case R_XTENSA_SLOT14_OP: {
+            USBSerial.printf("[SKIP] R_XTENSA_SLOT0_OP will be skipped for now!");
+            break;
             uint32_t slot = type - R_XTENSA_SLOT0_OP;
             // Для слотов инструкций Xtensa: обычно S + A - P, но упрощенно S + A
             uint32_t value = (uint32_t)(uintptr_t)symbol_addr + addend;
-            printf("  Слот инструкции: slot%d\n", slot);
-            printf("  Формула (упрощенно): S + A = %p + 0x%08x\n", (void*)symbol_addr, addend);
-            printf("  Результат: 0x%08x\n", value);
-            printf("  Записываем 0x%08x в слот %d по адресу %p\n", 
+            USBSerial.printf("  Слот инструкции: slot%d\n", slot);
+            USBSerial.printf("  Формула (упрощенно): S + A = %p + 0x%08x\n", (void*)symbol_addr, addend);
+            USBSerial.printf("  Результат: 0x%08x\n", value);
+            USBSerial.printf("  Записываем 0x%08x в слот %d по адресу %p\n", 
                    value, slot, (void*)location32);
-            *location32 = value;
+            // *location32 = value;
+            
+            apply_xtensa_slot0_reloc(location8, value);
+
             break;
         }
         
@@ -590,7 +716,7 @@ void process_relocation(Elf32_Rela *rela, SectionBuffer *target,
             
             decode_xtensa_instruction(current_instr, &op0, &op1, &op2);
             
-            printf("  Текущая инструкция: 0x%08x (op0=0x%x, op1=0x%x, op2=0x%x)\n",
+            USBSerial.printf("  Текущая инструкция: 0x%08x (op0=0x%x, op1=0x%x, op2=0x%x)\n",
                    current_instr, op0, op1, op2);
             
             // Для OP релокаций: значение символа помещается в поле опкода
@@ -598,29 +724,29 @@ void process_relocation(Elf32_Rela *rela, SectionBuffer *target,
             
             if (op_field == 0) {
                 op0 = new_op;
-                printf("  Обновляем op0 на 0x%x (S + A = %p + 0x%08x)\n", 
+                USBSerial.printf("  Обновляем op0 на 0x%x (S + A = %p + 0x%08x)\n", 
                        new_op, (void*)symbol_addr, addend);
             } else if (op_field == 1) {
                 op1 = new_op;
-                printf("  Обновляем op1 на 0x%x (S + A = %p + 0x%08x)\n", 
+                USBSerial.printf("  Обновляем op1 на 0x%x (S + A = %p + 0x%08x)\n", 
                        new_op, (void*)symbol_addr, addend);
             } else {
                 op2 = new_op;
-                printf("  Обновляем op2 на 0x%x (S + A = %p + 0x%08x)\n", 
+                USBSerial.printf("  Обновляем op2 на 0x%x (S + A = %p + 0x%08x)\n", 
                        new_op, (void*)symbol_addr, addend);
             }
             
             uint32_t new_instr = (op2 << 8) | (op1 << 4) | op0;
-            printf("  Новая инструкция: 0x%08x\n", new_instr);
-            printf("  Записываем по адресу %p\n", (void*)location32);
+            USBSerial.printf("  Новая инструкция: 0x%08x\n", new_instr);
+            USBSerial.printf("  Записываем по адресу %p\n", (void*)location32);
             *location32 = new_instr;
             break;
         }
         
         case R_XTENSA_GLOB_DAT:
         case R_XTENSA_JMP_SLOT: {
-            printf("  Динамическая релокация: запись адреса символа\n");
-            printf("  Записываем %p по адресу %p\n", (void*)symbol_addr, (void*)location32);
+            USBSerial.printf("  Динамическая релокация: запись адреса символа\n");
+            USBSerial.printf("  Записываем %p по адресу %p\n", (void*)symbol_addr, (void*)location32);
             *location32 = (uint32_t)(uintptr_t)symbol_addr;
             break;
         }
@@ -628,25 +754,25 @@ void process_relocation(Elf32_Rela *rela, SectionBuffer *target,
         case R_XTENSA_RELATIVE: {
             // Относительная релокация: адрес текущей секции + адденд
             uint32_t value = (uint32_t)(uintptr_t)target->alloc_addr + addend;
-            printf("  Относительная релокация: адрес секции + адденд\n");
-            printf("  Формула: addr(section) + A = %p + 0x%08x\n", 
+            USBSerial.printf("  Относительная релокация: адрес секции + адденд\n");
+            USBSerial.printf("  Формула: addr(section) + A = %p + 0x%08x\n", 
                    (void*)target->alloc_addr, addend);
-            printf("  Результат: 0x%08x\n", value);
-            printf("  Записываем 0x%08x по адресу %p\n", value, (void*)location32);
+            USBSerial.printf("  Результат: 0x%08x\n", value);
+            USBSerial.printf("  Записываем 0x%08x по адресу %p\n", value, (void*)location32);
             *location32 = value;
             break;
         }
         
         case R_XTENSA_NONE:
-            printf("  Пустая релокация - ничего не делаем\n");
+            USBSerial.printf("  Пустая релокация - ничего не делаем\n");
             break;
             
         default:
-            printf("  ВНИМАНИЕ: Необработанный тип релокации! Пропускаем.\n");
+            USBSerial.printf("  ВНИМАНИЕ: Необработанный тип релокации! Пропускаем.\n");
             break;
     }
     
-    printf("\n");
+    USBSerial.printf("\n");
 }
 
 void process_rel(Elf32_Rel *rel, SectionBuffer *target, 
@@ -663,16 +789,16 @@ void process_rel(Elf32_Rel *rel, SectionBuffer *target,
         rela.r_addend = 0;
     }
     
-    printf("[REL RELOCATION #%d] (адденд читается из целевого места)\n", reloc_index);
+    USBSerial.printf("[REL RELOCATION #%d] (адденд читается из целевого места)\n", reloc_index);
     process_relocation(&rela, target, reloc_section, ctx, reloc_index);
 }
 
 void apply_relocations(ELFContext *ctx) {
-    printf("\n");
+    USBSerial.printf("\n");
     print_separator(60);
-    printf("ПРИМЕНЕНИЕ РЕЛОКАЦИЙ:\n");
+    USBSerial.printf("ПРИМЕНЕНИЕ РЕЛОКАЦИЙ:\n");
     print_separator(60);
-    printf("\n");
+    USBSerial.printf("\n");
     
     int total_relocations = 0;
     int skipped_relocations = 0;
@@ -687,15 +813,15 @@ void apply_relocations(ELFContext *ctx) {
         
         // Загружаем секцию релокаций в память (если еще не загружена)
         if (!section->is_loaded) {
-            section->data = malloc(section->size);
+            section->data = (uint8_t*) malloc(section->size);
             if (!section->data) {
-                fprintf(stderr, "Failed to allocate memory for relocation section '%s'\n", section->name);
+                USBSerial.printf("Failed to allocate memory for relocation section '%s'\n", section->name);
                 continue;
             }
             
             fseek(ctx->file, section->header.sh_offset, SEEK_SET);
             if (fread(section->data, 1, section->size, ctx->file) != section->size) {
-                fprintf(stderr, "Failed to read relocation section '%s'\n", section->name);
+                USBSerial.printf("Failed to read relocation section '%s'\n", section->name);
                 free(section->data);
                 section->data = NULL;
                 continue;
@@ -705,58 +831,63 @@ void apply_relocations(ELFContext *ctx) {
             section->is_loaded = 1;
         }
         
-        printf("Найдена секция релокаций: %s\n", section->name);
-        printf("Тип: %s\n", 
+        USBSerial.printf("Найдена секция релокаций: %s\n", section->name);
+        USBSerial.printf("Тип: %s\n", 
                section->header.sh_type == SHT_RELA ? "RELA" : "REL");
-        printf("Размер: %u байт\n", section->header.sh_size);
+        USBSerial.printf("Размер: %u байт\n", section->header.sh_size);
         
-        // Находим целевую секцию (секцию, к которой применяются релокации)
+        // В поле sh_info содержится индекс целевой секции в исходной таблице заголовков
         uint32_t target_section_index = section->header.sh_info;
+        
         if (target_section_index >= ctx->elf_header.e_shnum) {
-            printf("  ОШИБКА: Неверный индекс целевой секции: %u\n\n", target_section_index);
+            USBSerial.printf("  ОШИБКА: Неверный индекс целевой секции: %u\n\n", target_section_index);
             skipped_relocations++;
             continue;
         }
         
-        // Находим буфер целевой секции
+        // Получаем заголовок целевой секции из исходной таблицы
+        Elf32_Shdr *target_section_hdr = &ctx->section_headers[target_section_index];
+        char *target_section_name = &ctx->section_names[target_section_hdr->sh_name];
+        
+        // Ищем загруженную целевую секцию
         SectionBuffer *target_buffer = NULL;
         for (int j = 0; j < ctx->section_count; j++) {
-            if (j == target_section_index) {
+            if (ctx->sections[j].header.sh_offset == target_section_hdr->sh_offset) {
                 target_buffer = &ctx->sections[j];
                 break;
             }
         }
         
         if (!target_buffer) {
-            printf("  ОШИБКА: Не найден буфер для целевой секции с индексом %u\n\n", 
-                   target_section_index);
+            USBSerial.printf("  ОШИБКА: Не найден буфер для целевой секции '%s'\n\n", 
+                   target_section_name);
             skipped_relocations++;
             continue;
         }
         
         // Проверяем, загружена ли целевая секция в память
         if (!target_buffer->is_loaded) {
-            printf("  ПРОПУСК: Целевая секция '%s' не загружена в память\n", target_buffer->name);
-            printf("           Релокации не будут применены к этой секции\n\n");
+            USBSerial.printf("  ПРОПУСК: Целевая секция '%s' не загружена в память\n", target_section_name);
+            USBSerial.printf("           Релокации не будут применены к этой секции\n\n");
             skipped_relocations++;
             continue;
         }
         
-        printf("Целевая секция: %s (адрес в ОЗУ: %p, размер: %zu)\n", 
-               target_buffer->name, 
+        USBSerial.printf("Целевая секция: %s (адрес в ОЗУ: %p, размер: %zu)\n", 
+               target_section_name, 
                (void*)target_buffer->alloc_addr,
                target_buffer->size);
-        printf("Флаги: 0x%08x", target_buffer->header.sh_flags);
-        if (target_buffer->header.sh_flags & SHF_EXECINSTR) printf(" EXECINSTR");
-        if (target_buffer->header.sh_flags & SHF_WRITE) printf(" WRITE");
-        if (target_buffer->header.sh_flags & SHF_ALLOC) printf(" ALLOC");
-        printf("\n");
+        USBSerial.printf("Флаги: 0x%08x", target_buffer->header.sh_flags);
+        if (target_buffer->header.sh_flags & SHF_EXECINSTR) USBSerial.printf(" EXECINSTR");
+        if (target_buffer->header.sh_flags & SHF_WRITE) USBSerial.printf(" WRITE");
+        if (target_buffer->header.sh_flags & SHF_ALLOC) USBSerial.printf(" ALLOC");
+        USBSerial.printf("\n");
         
         if (section->header.sh_type == SHT_RELA) {
             Elf32_Rela *relocations = (Elf32_Rela *)section->data;
             size_t num_relocations = section->size / sizeof(Elf32_Rela);
             
-            printf("Количество релокаций RELA: %zu\n\n", num_relocations);
+            USBSerial.printf("Количество релокаций RELA: %zu\n\n", num_relocations);
             
             for (size_t j = 0; j < num_relocations; j++) {
                 process_relocation(&relocations[j], target_buffer, section, ctx, total_relocations);
@@ -766,7 +897,7 @@ void apply_relocations(ELFContext *ctx) {
             Elf32_Rel *relocations = (Elf32_Rel *)section->data;
             size_t num_relocations = section->size / sizeof(Elf32_Rel);
             
-            printf("Количество релокаций REL: %zu\n\n", num_relocations);
+            USBSerial.printf("Количество релокаций REL: %zu\n\n", num_relocations);
             
             for (size_t j = 0; j < num_relocations; j++) {
                 process_rel(&relocations[j], target_buffer, section, ctx, total_relocations);
@@ -775,23 +906,23 @@ void apply_relocations(ELFContext *ctx) {
         }
         
         print_separator(40);
-        printf("\n");
+        USBSerial.printf("\n");
     }
     
-    printf("СТАТИСТИКА РЕЛОКАЦИЙ:\n");
-    printf("  Применено релокаций: %d\n", total_relocations);
-    printf("  Пропущено релокаций: %d\n", skipped_relocations);
-    printf("\n");
+    USBSerial.printf("СТАТИСТИКА РЕЛОКАЦИЙ:\n");
+    USBSerial.printf("  Применено релокаций: %d\n", total_relocations);
+    USBSerial.printf("  Пропущено релокаций: %d\n", skipped_relocations);
+    USBSerial.printf("\n");
 }
 
 void print_section_info(ELFContext *ctx) {
-    printf("\n");
+    USBSerial.printf("\n");
     print_separator(60);
-    printf("СЕКЦИИ ЗАГРУЖЕННЫЕ В ПАМЯТЬ:\n");
+    USBSerial.printf("СЕКЦИИ ЗАГРУЖЕННЫЕ В ПАМЯТЬ:\n");
     print_separator(60);
-    printf("\n");
+    USBSerial.printf("\n");
     
-    printf("%-20s %-16s %-12s %-10s %s\n", 
+    USBSerial.printf("%-20s %-16s %-12s %-10s %s\n", 
            "Имя секции", "Адрес в ОЗУ", "Размер", "Флаги", "Тип");
     print_separator(80);
     
@@ -809,27 +940,27 @@ void print_section_info(ELFContext *ctx) {
         alloc_section_count++;
         total_size += section->size;
         
-        printf("%-20s %-16p %-12zu ",
+        USBSerial.printf("%-20s %-16p %-12zu ",
                section->name,
                (void*)section->alloc_addr,
                section->size);
         
         // Флаги
-        if (section->header.sh_flags & SHF_EXECINSTR) printf("X");
-        if (section->header.sh_flags & SHF_WRITE) printf("W");
-        if (section->header.sh_flags & SHF_ALLOC) printf("A");
-        printf(" ");
+        if (section->header.sh_flags & SHF_EXECINSTR) USBSerial.printf("X");
+        if (section->header.sh_flags & SHF_WRITE) USBSerial.printf("W");
+        if (section->header.sh_flags & SHF_ALLOC) USBSerial.printf("A");
+        USBSerial.printf(" ");
         
         // Тип секции
-        printf("%s", get_section_type_name(section->header.sh_type));
+        USBSerial.printf("%s", get_section_type_name(section->header.sh_type));
         
-        printf("\n");
+        USBSerial.printf("\n");
     }
     
-    printf("\nИТОГО:\n");
-    printf("  Секций в памяти: %d\n", alloc_section_count);
-    printf("  Всего памяти: %zu байт\n", total_size);
-    printf("\n");
+    USBSerial.printf("\nИТОГО:\n");
+    USBSerial.printf("  Секций в памяти: %d\n", alloc_section_count);
+    USBSerial.printf("  Всего памяти: %zu байт\n", total_size);
+    USBSerial.printf("\n");
 }
 
 void cleanup(ELFContext *ctx) {
@@ -852,35 +983,29 @@ void cleanup(ELFContext *ctx) {
     memset(ctx, 0, sizeof(ELFContext));
 }
 
-int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        fprintf(stderr, "Использование: %s <elf_file>\n", argv[0]);
-        fprintf(stderr, "Пример: %s firmware.elf\n", argv[0]);
-        return 1;
-    }
-
+int start_elf(const char filename[], exp_os* os) {
     ELFContext ctx = {0};
     
-    printf("Прототип загрузчика ELF приложений для Xtensa (ESP32)\n");
-    printf("Файл: %s\n\n", argv[1]);
+    USBSerial.printf("Прототип загрузчика ELF приложений для Xtensa (ESP32)\n");
+    USBSerial.printf("Файл: %s\n\n", filename);
     
     // 1. Парсим ELF файл
-    if (parse_elf(argv[1], &ctx) != 0) {
-        fprintf(stderr, "Ошибка при разборе ELF файла\n");
+    if (parse_elf(filename, &ctx) != 0) {
+        USBSerial.printf("Ошибка при разборе ELF файла\n");
         return 1;
     }
     
     // 2. Загружаем секции в память (используя malloc)
     int loaded = load_sections_to_memory(&ctx);
     if (loaded <= 0) {
-        fprintf(stderr, "Не удалось загрузить секции в память\n");
+        USBSerial.printf("Не удалось загрузить секции в память\n");
         cleanup(&ctx);
         return 1;
     }
     
     // 3. Загружаем таблицу символов
     if (load_symbols(&ctx) != 0) {
-        printf("Предупреждение: не удалось загрузить таблицу символов\n");
+        USBSerial.printf("Предупреждение: не удалось загрузить таблицу символов\n");
     }
     
     // 4. Вычисляем абсолютные адреса символов
@@ -888,12 +1013,12 @@ int main(int argc, char *argv[]) {
         calculate_symbol_addresses(&ctx);
     }
     
-    printf("ELF файл успешно загружен!\n");
-    printf("Тип файла: %u, Архитектура: %u (Xtensa)\n", 
+    USBSerial.printf("ELF файл успешно загружен!\n");
+    USBSerial.printf("Тип файла: %u, Архитектура: %u (Xtensa)\n", 
            ctx.elf_header.e_type, ctx.elf_header.e_machine);
-    printf("Точка входа: 0x%08x\n", ctx.entry_point);
-    printf("Загружено секций в память: %d\n", loaded);
-    printf("Загружено символов: %d\n\n", ctx.symbol_count);
+    USBSerial.printf("Точка входа: 0x%08x\n", ctx.entry_point);
+    USBSerial.printf("Загружено секций в память: %d\n", loaded);
+    USBSerial.printf("Загружено символов: %d\n\n", ctx.symbol_count);
     
     // Выводим информацию о секциях в памяти
     print_section_info(&ctx);
@@ -903,13 +1028,92 @@ int main(int argc, char *argv[]) {
     
     // Выводим точку входа как указатель на функцию
     if (ctx.entry_point != 0) {
-        printf("Точка входа программы: 0x%08x\n", ctx.entry_point);
-        printf("Для запуска программы вызовите функцию по адресу: 0x%08x\n", ctx.entry_point);
+        USBSerial.printf("Точка входа программы: 0x%08x\n", ctx.entry_point);
+        USBSerial.printf("Для запуска программы вызовите функцию по адресу: 0x%08x\n", ctx.entry_point);
     }
     
-    printf("\nЗагрузка завершена успешно!\n");
-    printf("Программа загружена в память и готова к выполнению.\n");
+    USBSerial.printf("\nЗагрузка завершена успешно!\n");
+    USBSerial.printf("Программа загружена в память и готова к выполнению.\n");
+
+    int text_section_id = find_section_by_name(&ctx, ".text");
+    USBSerial.printf(".text имеет индекс %d\n", text_section_id);
+
+    int(*fn_main)(exp_os* os) = (int(*)(exp_os*)) ctx.sections[text_section_id].data;
+
+    USBSerial.printf("АДрес main() = %p\n", fn_main);
+
+    USBSerial.printf("Программа будет выполнена сейчас:\n");
+
+    vTaskDelay(5);
+
+    int ret = fn_main(os);
+
+    USBSerial.printf("Выполнение окончено, оно возвратило: %d\n", ret);
     
     cleanup(&ctx);
-    return 0;
+
+    return ret;
+}
+
+exp_os os;
+
+extern "C" int printf_wrapper(const char* format, ...) {
+    // USBSerial.printf("[DEBUG] printf_wrapper was called...\n");
+    va_list args;
+    va_start(args, format);
+    
+    // В ESP32 класс HWSerial (USBSerial) наследует vprintf
+    int result = USBSerial.vprintf(format, args);
+    
+    va_end(args);
+    return result;
+}
+
+namespace launcher {
+    #include "export.h"
+    
+    
+
+    void dsp(void) {
+        display.pushImage(0, 0, 240, 280, os.fb);
+    }
+
+    void main(void * p) {
+        printf_wrapper("APPLAUNCER launching now!!!\n");
+
+        
+        os.fb = (uint16_t*) calloc(240*280, sizeof(uint16_t));
+        os.display = dsp;
+
+
+        os.printf = printf_wrapper;
+
+        os.printf("printf_wrapper test d=%d, p=%p, s=%s\n\n\n", 42, os.printf, "It's a string");
+
+        os.putc = [](char c) {
+            USBSerial.printf("%c", c);
+        };
+
+        os.putd = [](int d) {
+            USBSerial.printf("%d", d);
+        };
+
+        os.vTaskDelay = vTaskDelay;
+
+        os.onKeyPress = KOS::onKeyPress;
+
+        KOS::initSD();
+
+        int ret  = start_elf("/sdcard/program.elf", &os);
+
+        for(int i = 0; i < 10; i ++) {
+            USBSerial.printf("ОНО завершилось с кодом: %d\n", ret);
+        }
+
+        vTaskDelay(portMAX_DELAY);
+    }
+
+    void init() {
+        xTaskCreatePinnedToCore(main, "BIN launcher", 32768, NULL, 1, NULL, 1);
+    }
 }

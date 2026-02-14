@@ -3,26 +3,26 @@
 
 // Include Apps here:
 
-#include "doodle_jump/main.h"
-#include "infinite_bunner/main.h"
-#include "WeChat/main.h"
-#include "preference/main.h"
-#include "korobochka_commander/main.h"
-#include "zmeyka/main.h"
-#include "StopWatch/main.h"
-#include "doom/main.h"
-#include "robot_control/main.h"
-#include "flappy_bird/main.h"
+// #include "doodle_jump/main.h"
+// #include "infinite_bunner/main.h"
+// #include "WeChat/main.h"
+// #include "preference/main.h"
+// #include "korobochka_commander/main.h"
+// #include "zmeyka/main.h"
+// #include "StopWatch/main.h"
+// #include "doom/main.h"
+// #include "robot_control/main.h"
+// #include "flappy_bird/main.h"
 #include "watch/main.h"
-#include "cardReader/main.h"
+// #include "cardReader/main.h"
 #include "remote/main.h"
 #include "launcher/main.h"
 
 
 // #include "calculator/main.h"
 
-#include "calendar/main.h"
-#include "clock/main.h"
+// #include "calendar/main.h"
+// #include "clock/main.h"
 
 
 
@@ -78,6 +78,8 @@ void setup() {
 
   #endif
 
+  USBSerial.setTxBufferSize(8192);
+
   USBSerial.begin();
 
   if(digitalRead(16)) {
@@ -102,28 +104,28 @@ void setup() {
 
 
   apps = {
-    {"Flappy bird", &FlappyBird::init, TFT_GREEN},
-    {"Doodle jump", &doodle_jump::init, TFT_WHITE}, 
+    // {"Flappy bird", &FlappyBird::init, TFT_GREEN},
+    // {"Doodle jump", &doodle_jump::init, TFT_WHITE}, 
     #ifdef IPS169
-    {"Bunner",      &infinite_bunner::init, TFT_GREENYELLOW}, 
+    // {"Bunner",      &infinite_bunner::init, TFT_GREENYELLOW}, 
     #endif
     // Application{"Battleship",      &BattleShip::init, infinite_bunner::logo}, 
-    {"Preferences", &preference::init, TFT_SKYBLUE},
-    {"Korobka commander", &commander_init, TFT_SKYBLUE},
-    {"Zmeyka", &zmeyka::init, TFT_LIGHTGRAY},
-    {"StopWatch", &stopWatch::init, TFT_ORANGE},
+    // {"Preferences", &preference::init, TFT_SKYBLUE},
+    // {"Korobka commander", &commander_init, TFT_SKYBLUE},
+    // {"Zmeyka", &zmeyka::init, TFT_LIGHTGRAY},
+    // {"StopWatch", &stopWatch::init, TFT_ORANGE},
     // Application{"Video", &video::init, NULL},
-    {"Calendar", &calendar::init, TFT_ORANGE},
+    // {"Calendar", &calendar::init, TFT_ORANGE},
     // {"BLUETOOTH moudse", &BLE_MOUSE::init, TFT_PINK},
-    {"WeChat", &WeChat::init, TFT_PURPLE},
-    {"DooM", &doom::init, TFT_RED},
+    // {"WeChat", &WeChat::init, TFT_PURPLE},
+    // {"DooM", &doom::init, TFT_RED},
     // {"Robot", &robot_control::init, NULL},
-    {"CardReader mode", &cardReader::init, TFT_SKYBLUE},
+    // {"CardReader mode", &cardReader::init, TFT_SKYBLUE},
     {"TV remote", &TVremote::init, TFT_MAROON},
     {"Launcher", &launcher::init, TFT_RED},
   };
   if(KOS::extRTC_IN) {  
-    apps.insert(apps.begin()+8, 
+    apps.insert(apps.begin(), 
       {"Clock", &watch::init, TFT_ORANGE}
     );
   }

@@ -19,16 +19,7 @@
 
 #include "display.h"
 
-enum {
-  BTN_UP = 0,
-  BTN_DOWN,
-  BTN_BOOT,
-  JOY_UP,
-  JOY_DOWN,
-  JOY_LEFT,
-  JOY_RIGHT,
-  JOY_CENTER
-};
+#include "../launcher/export.h"
 
 
 

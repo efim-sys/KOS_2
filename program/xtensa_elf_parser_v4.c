@@ -641,6 +641,8 @@ void process_relocation(Elf32_Rela *rela, SectionBuffer *target,
     uint32_t type = ELF32_R_TYPE(rela->r_info);
     uint32_t sym_index = ELF32_R_SYM(rela->r_info);
     int32_t addend = rela->r_addend;
+
+    
     
     // Проверяем, что смещение находится в пределах секции
     if (offset >= target->size) {
@@ -654,10 +656,18 @@ void process_relocation(Elf32_Rela *rela, SectionBuffer *target,
     uint32_t *location32 = (uint32_t *)location;
     uint16_t *location16 = (uint16_t *)location;
     uint8_t *location8 = (uint8_t *)location;
+
+    
+
+    addend = *((int32_t*)location);
+
+
+
+
     
     uint8_t *symbol_addr = get_symbol_absolute_addr(ctx, sym_index);
     char *symbol_name = get_symbol_name(ctx, sym_index);
-    
+    if(type == R_XTENSA_SLOT0_OP) return;
     printf("[RELOCATION #%d]\n", reloc_index);
     printf("  Тип: %s (%u)\n", get_relocation_type_name(type), type);
     printf("  Секция: %s (адрес в ОЗУ: %p, размер: 0x%08zx)\n", 
