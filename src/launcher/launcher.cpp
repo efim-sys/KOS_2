@@ -76,7 +76,7 @@ typedef struct {
 int parse_elf(const char *filename, ELFContext *ctx);
 int load_sections_to_memory(ELFContext *ctx);
 void apply_relocations(ELFContext *ctx);
-void process_relocation(Elf32_Rela *rela, SectionBuffer *target, 
+int process_relocation(Elf32_Rela *rela, SectionBuffer *target, 
                        SectionBuffer *reloc_section, ELFContext *ctx, int reloc_index);
 void process_rel(Elf32_Rel *rel, SectionBuffer *target, 
                 SectionBuffer *reloc_section, ELFContext *ctx, int reloc_index);
@@ -602,177 +602,61 @@ void apply_xtensa_slot0_reloc(uint8_t *p_ptr, uint32_t target_addr) {
         p_ptr[0], p_ptr[1], p_ptr[2], offset);
 }
 
-void process_relocation(Elf32_Rela *rela, SectionBuffer *target, 
+int process_relocation(Elf32_Rela *rela, SectionBuffer *target, 
                        SectionBuffer *reloc_section, ELFContext *ctx, int reloc_index) {
-                        
-    uint32_t offset = rela->r_offset;
     uint32_t type = ELF32_R_TYPE(rela->r_info);
+
+    if(type != R_XTENSA_32) return -1; // Обрабатывается только тип релокаций R_XTENSA_32
+    
+    uint32_t offset = rela->r_offset;
     uint32_t sym_index = ELF32_R_SYM(rela->r_info);
     int32_t addend = rela->r_addend;
-    
+
     // Проверяем, что смещение находится в пределах секции
     if (offset >= target->size) {
-        USBSerial.printf("[ERROR] Релокация #%d: смещение 0x%08x вне границ секции %s (размер: 0x%08x)\n",
+        printf("[ERROR] Релокация #%d: смещение 0x%08x вне границ секции %s (размер: 0x%08x)\n",
                reloc_index, offset, target->name, target->size);
-        return;
+        return -1;
     }
     
     // Получаем указатель на место для применения релокации
-    uint8_t *location = target->alloc_addr + offset;
-    uint32_t *location32 = (uint32_t *)location;
-    uint16_t *location16 = (uint16_t *)location;
-    uint8_t *location8 = (uint8_t *)location;
+    uint32_t *location = (uint32_t*) target->alloc_addr + offset;
+        
 
     addend = *((int32_t*)location);
+
     
     uint8_t *symbol_addr = get_symbol_absolute_addr(ctx, sym_index);
     char *symbol_name = get_symbol_name(ctx, sym_index);
 
-    if(type == R_XTENSA_SLOT0_OP) {
-        // USBSerial.printf("[SKIP] R_XTENSA_SLOT0_OP will be skipped for now!");
-        return;
-    }
     
-    USBSerial.printf("[RELOCATION #%d]\n", reloc_index);
-    USBSerial.printf("  Тип: %s (%u)\n", get_relocation_type_name(type), type);
-    USBSerial.printf("  Секция: %s (адрес в ОЗУ: %p, размер: 0x%08zx)\n", 
+    printf("[RELOCATION #%d]\n", reloc_index);
+    printf("  Тип: (%u)\n", type);
+    printf("  Секция: %s (адрес в ОЗУ: %p, размер: 0x%08zx)\n", 
            target->name, (void*)target->alloc_addr, target->size);
-    USBSerial.printf("  Смещение в секции: 0x%08x\n", offset);
-    USBSerial.printf("  Адрес релокации в ОЗУ: %p\n", (void*)location);
-    USBSerial.printf("  Символ: %s (индекс: %u, адрес: %p)\n", 
+    printf("  Смещение в секции: 0x%08x\n", offset);
+    printf("  Адрес релокации в ОЗУ: %p\n", (void*)location);
+    printf("  Символ: %s (индекс: %u, адрес: %p)\n", 
            symbol_name, sym_index, (void*)symbol_addr);
-    USBSerial.printf("  Адденд: 0x%08x (%d)\n", addend, addend);
+    printf("  Адденд: 0x%08x (%d)\n", addend, addend);
     
     // Для неразрешенных символов (NULL) показываем предупреждение
     if (symbol_addr == NULL && sym_index != 0) {
-        USBSerial.printf("  ВНИМАНИЕ: Символ не разрешен (адрес = NULL). Возможно, внешняя ссылка.\n");
-        return; // Не применяем релокацию для неразрешенных символов
+        printf("  ВНИМАНИЕ: Символ не разрешен (адрес = NULL). Возможно, внешняя ссылка.\n");
+        return -1; // Не применяем релокацию для неразрешенных символов
     }
     
-    switch(type) {
-        case R_XTENSA_32: {
-            // Абсолютная 32-битная релокация: S + A
-            uint32_t value = (uint32_t)(uintptr_t)symbol_addr + addend;
-            USBSerial.printf("  Формула: S + A = %p + 0x%08x\n", (void*)symbol_addr, addend);
-            USBSerial.printf("  Результат: 0x%08x\n", value);
-            USBSerial.printf("  Записываем 0x%08x по адресу %p\n", 
-                   value, (void*)location32);
-            *location32 = value;
-            break;
-        }
-        
-        case R_XTENSA_32_PCREL: {
-            // PC-относительная 32-битная релокация: S + A - P
-            // В Xtensa PC указывает на следующую инструкцию
-            uint32_t pc = (uint32_t)(uintptr_t)location + 4; // PC указывает на следующую инструкцию
-            uint32_t value = (uint32_t)(uintptr_t)symbol_addr + addend - pc;
-            USBSerial.printf("  PC = P + 4 = %p + 4 = 0x%08x\n", (void*)location, pc);
-            USBSerial.printf("  Формула: S + A - PC = %p + 0x%08x - 0x%08x\n", 
-                   (void*)symbol_addr, addend, pc);
-            USBSerial.printf("  Результат: 0x%08x\n", value);
-            USBSerial.printf("  Записываем 0x%08x по адресу %p\n", value, (void*)location32);
-            *location32 = value;
-            break;
-        }
-        
-        case R_XTENSA_SLOT0_OP:
-        case R_XTENSA_SLOT1_OP:
-        case R_XTENSA_SLOT2_OP:
-        case R_XTENSA_SLOT3_OP:
-        case R_XTENSA_SLOT4_OP:
-        case R_XTENSA_SLOT5_OP:
-        case R_XTENSA_SLOT6_OP:
-        case R_XTENSA_SLOT7_OP:
-        case R_XTENSA_SLOT8_OP:
-        case R_XTENSA_SLOT9_OP:
-        case R_XTENSA_SLOT10_OP:
-        case R_XTENSA_SLOT11_OP:
-        case R_XTENSA_SLOT12_OP:
-        case R_XTENSA_SLOT13_OP:
-        case R_XTENSA_SLOT14_OP: {
-            USBSerial.printf("[SKIP] R_XTENSA_SLOT0_OP will be skipped for now!");
-            break;
-            uint32_t slot = type - R_XTENSA_SLOT0_OP;
-            // Для слотов инструкций Xtensa: обычно S + A - P, но упрощенно S + A
-            uint32_t value = (uint32_t)(uintptr_t)symbol_addr + addend;
-            USBSerial.printf("  Слот инструкции: slot%d\n", slot);
-            USBSerial.printf("  Формула (упрощенно): S + A = %p + 0x%08x\n", (void*)symbol_addr, addend);
-            USBSerial.printf("  Результат: 0x%08x\n", value);
-            USBSerial.printf("  Записываем 0x%08x в слот %d по адресу %p\n", 
-                   value, slot, (void*)location32);
-            // *location32 = value;
-            
-            apply_xtensa_slot0_reloc(location8, value);
+    // Абсолютная 32-битная релокация: S + A
+    uint32_t value = (uint32_t)symbol_addr + addend;
+    printf("  Формула: S + A = %p + 0x%08x\n", (void*)symbol_addr, addend);
+    printf("  Результат: 0x%08x\n", value);
+    printf("  Записываем 0x%08x по адресу %p\n", 
+            value, (void*)location);
+    *location = value;    
+    
+    printf("\n");
 
-            break;
-        }
-        
-        case R_XTENSA_OP0:
-        case R_XTENSA_OP1:
-        case R_XTENSA_OP2: {
-            uint32_t op_field = type - R_XTENSA_OP0;
-            uint32_t current_instr = *location32;
-            uint32_t op0, op1, op2;
-            
-            decode_xtensa_instruction(current_instr, &op0, &op1, &op2);
-            
-            USBSerial.printf("  Текущая инструкция: 0x%08x (op0=0x%x, op1=0x%x, op2=0x%x)\n",
-                   current_instr, op0, op1, op2);
-            
-            // Для OP релокаций: значение символа помещается в поле опкода
-            uint32_t new_op = ((uint32_t)(uintptr_t)symbol_addr + addend) & 0xF;
-            
-            if (op_field == 0) {
-                op0 = new_op;
-                USBSerial.printf("  Обновляем op0 на 0x%x (S + A = %p + 0x%08x)\n", 
-                       new_op, (void*)symbol_addr, addend);
-            } else if (op_field == 1) {
-                op1 = new_op;
-                USBSerial.printf("  Обновляем op1 на 0x%x (S + A = %p + 0x%08x)\n", 
-                       new_op, (void*)symbol_addr, addend);
-            } else {
-                op2 = new_op;
-                USBSerial.printf("  Обновляем op2 на 0x%x (S + A = %p + 0x%08x)\n", 
-                       new_op, (void*)symbol_addr, addend);
-            }
-            
-            uint32_t new_instr = (op2 << 8) | (op1 << 4) | op0;
-            USBSerial.printf("  Новая инструкция: 0x%08x\n", new_instr);
-            USBSerial.printf("  Записываем по адресу %p\n", (void*)location32);
-            *location32 = new_instr;
-            break;
-        }
-        
-        case R_XTENSA_GLOB_DAT:
-        case R_XTENSA_JMP_SLOT: {
-            USBSerial.printf("  Динамическая релокация: запись адреса символа\n");
-            USBSerial.printf("  Записываем %p по адресу %p\n", (void*)symbol_addr, (void*)location32);
-            *location32 = (uint32_t)(uintptr_t)symbol_addr;
-            break;
-        }
-        
-        case R_XTENSA_RELATIVE: {
-            // Относительная релокация: адрес текущей секции + адденд
-            uint32_t value = (uint32_t)(uintptr_t)target->alloc_addr + addend;
-            USBSerial.printf("  Относительная релокация: адрес секции + адденд\n");
-            USBSerial.printf("  Формула: addr(section) + A = %p + 0x%08x\n", 
-                   (void*)target->alloc_addr, addend);
-            USBSerial.printf("  Результат: 0x%08x\n", value);
-            USBSerial.printf("  Записываем 0x%08x по адресу %p\n", value, (void*)location32);
-            *location32 = value;
-            break;
-        }
-        
-        case R_XTENSA_NONE:
-            USBSerial.printf("  Пустая релокация - ничего не делаем\n");
-            break;
-            
-        default:
-            USBSerial.printf("  ВНИМАНИЕ: Необработанный тип релокации! Пропускаем.\n");
-            break;
-    }
-    
-    USBSerial.printf("\n");
+    return 0;
 }
 
 void process_rel(Elf32_Rel *rel, SectionBuffer *target, 
@@ -983,6 +867,19 @@ void cleanup(ELFContext *ctx) {
     memset(ctx, 0, sizeof(ELFContext));
 }
 
+void* find_symbol(ELFContext *ctx, const char* symbol_name) {
+    for(uint16_t i = 0; i < ctx ->symbol_count; i++) {
+        const char* current_symbol_name = ctx->symbols[i].name;
+        if(!current_symbol_name) continue;
+
+        if(strcmp(symbol_name, current_symbol_name) == 0) {
+            return ctx->symbols[i].absolute_addr;
+        }
+    }
+
+    return NULL;
+}
+
 int start_elf(const char filename[], exp_os* os) {
     ELFContext ctx = {0};
     
@@ -1038,13 +935,13 @@ int start_elf(const char filename[], exp_os* os) {
     int text_section_id = find_section_by_name(&ctx, ".text");
     USBSerial.printf(".text имеет индекс %d\n", text_section_id);
 
-    int(*fn_main)(exp_os* os) = (int(*)(exp_os*)) ctx.sections[text_section_id].data;
+    int(*fn_main)(exp_os* os) = (int(*)(exp_os*)) find_symbol(&ctx, "main");
+
+    if(!fn_main) return -USBSerial.printf("Unable to find main()... stopping.");
 
     USBSerial.printf("АДрес main() = %p\n", fn_main);
 
     USBSerial.printf("Программа будет выполнена сейчас:\n");
-
-    vTaskDelay(5);
 
     int ret = fn_main(os);
 
@@ -1054,6 +951,8 @@ int start_elf(const char filename[], exp_os* os) {
 
     return ret;
 }
+
+
 
 exp_os os;
 
@@ -1099,8 +998,14 @@ namespace launcher {
         };
 
         os.vTaskDelay = vTaskDelay;
-
+        
         os.onKeyPress = KOS::onKeyPress;
+        os.digitalWrite = digitalWrite;
+        os.digitalRead = digitalRead;
+        os.pinMode = pinMode;
+        os.malloc = malloc;
+        os.calloc = calloc;
+        os.free = free;
 
         KOS::initSD();
 

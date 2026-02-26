@@ -1,4 +1,5 @@
 #include "KOS/KOS.h"
+#include "bmp_headers.h"
 
 namespace KOS {
     uint16_t *rotateImageRight(uint16_t *from, int w, int h)
@@ -147,5 +148,73 @@ namespace KOS {
 
         *width = w;
         *height = h;
+    }
+    
+    int saveFramebuffer(uint16_t *framebuffer, uint32_t w, uint32_t h, const char* filename) {
+        // В файле строки должны быть выровнены по 4 байта (padding)
+        int row_size = (w * sizeof(uint16_t) + 0b11) & ~0b11;
+
+        const uint32_t masks[3] = {0xF800, 0x07E0, 0x001F};
+
+        BMP_file_header_t file_hdr = {
+            .bfType = 0x4d42, // ASCII "BM"
+            .bfSize = row_size*h*sizeof(uint16_t) + sizeof(BMP_file_header_t) + sizeof(BMP_info_header_t) + 12, 
+                // bitmap size + header size + size of masks
+            .bfReserved1 = 0,
+            .bfReserved2 = 0,
+            .bfOffBits = sizeof(BMP_file_header_t) + sizeof(BMP_info_header_t) + 12 // Header size
+        };
+
+        BMP_info_header_t info_hdr = {
+            .biSize = 40,   // Size of this header
+            .biWidth = w,
+            .biHeight = h,
+            .biPlanes = 1,      // must be 1
+            .biBitCount = 16,   // 16 bpp
+            .biCompression = 3, // BI_BITFIELDS compression
+            .biSizeImage = row_size*h*sizeof(uint16_t),
+            .biXPelsPerMeter = 0,   // pixels per meter (don't use)
+            .biYPelsPerMeter = 0,   // pixels per meter (don't use)
+            .biClrUsed = 0,     // For color tables (don't use)
+            .biClrImportant = 0 // For color tables (don't use)
+        };
+
+        USBSerial.printf("row_size = %d\n", row_size);
+        USBSerial.printf(".bfsize = %d\n", file_hdr.bfSize);
+        USBSerial.printf("sizeof(file_hdr) = %d\n", sizeof(file_hdr));
+        USBSerial.printf("sizeof(info_hdr) = %d\n", sizeof(info_hdr));
+
+        FILE* bmp_file = fopen(filename, "wb");
+
+        if(!bmp_file) {
+            return -USBSerial.printf("Cannot open file [%s] for saving image\n", filename);
+        }
+
+        
+
+        fwrite(&file_hdr, sizeof(file_hdr), 1, bmp_file);
+        fwrite(&info_hdr, sizeof(info_hdr), 1, bmp_file);
+        fwrite(masks, sizeof(uint32_t), 3, bmp_file);
+
+        // fputc(0, bmp_file);
+        // fputc(0, bmp_file);
+        // fputc(0, bmp_file);
+
+        uint16_t* row_buffer = (uint16_t*) calloc(row_size, 1);
+
+        for(int32_t y = h-1; y >= 0; y--) {
+            for(int32_t x = 0; x < w; x++) {
+                row_buffer[x] = ntohs(framebuffer[y * w + x]);
+                
+            }
+
+            fwrite(row_buffer, row_size, 1, bmp_file);
+        }
+
+
+        free(row_buffer);
+        fclose(bmp_file);
+
+        return 0;
     }
 }

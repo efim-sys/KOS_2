@@ -32,6 +32,9 @@ namespace doom {
         }
     };
 
+    int screenshot_id = 0;
+    bool do_screenshot = false;
+
     lgfx::rgb565_t* globalTexture;
     uint16_t* uintTexture;
 
@@ -299,15 +302,15 @@ namespace doom {
 
                 
                 if(!guard->drawn and (ray == (numOfRays-1) or enemyDst > cross->dst)) {
-                    USBSerial.printf("EnemyDst = %f; wallDst = %f\n", enemyDst, cross->dst);
+                    // USBSerial.printf("EnemyDst = %f; wallDst = %f\n", enemyDst, cross->dst);
                     
-                    USBSerial.printf("enemyAngle = %f\n", enemyAngle);
+                    // USBSerial.printf("enemyAngle = %f\n", enemyAngle);
                     if(enemyAngle < FOV and enemyAngle > - FOV) {
                         int enemyX = (numOfRays/2)-enemyXConst*sinf(enemyAngle);
                         float dimension = (40.0/enemyDst);
                         canvas.pushImageRotateZoom(enemyX, display.height()/2, 32, 32, 0, dimension, dimension, 64, 64, guard->textures[0], 0xE007);
                     }
-                    else USBSerial.printf("Enemy out of FOV; EnemyAngle = %f\n", enemyAngle);
+                    // else USBSerial.printf("Enemy out of FOV; EnemyAngle = %f\n", enemyAngle);
                     guard->drawn = true;
                 }
             }
@@ -477,6 +480,10 @@ namespace doom {
         player.y = 30;
         player.r = 2;
 
+        KOS::onKeyPress(BTN_BOOT, [](uint8_t k){
+            do_screenshot = true;
+        });
+
 
         // for(uint i = 0; i < 8; i ++) {
         //     KOS::onKeyPress(i, kpressHandler);
@@ -499,9 +506,20 @@ namespace doom {
 
         xTaskCreate(movingHandler, "mvg hd", 2048, NULL, 5, NULL);
 
+        KOS::initSD();
+
         while(true) {
             if(renderMethod)render2D();
             else render3D();
+
+            if(do_screenshot) {
+                do_screenshot = false;
+
+                char screenshot_filename[64] = "";
+                sprintf(screenshot_filename, "/sdcard/doom_screenshot%03d.bmp", screenshot_id++);
+                KOS::saveFramebuffer((uint16_t*) canvas.getBuffer(), canvas.width(), canvas.height(), screenshot_filename);
+            }
+
             vTaskDelay(10);
         }
     }

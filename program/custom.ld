@@ -1,9 +1,16 @@
 SECTIONS
 {
-    /* 1. Код */
-    .text : {
+    .text : ALIGN(4) {
         . = ALIGN(4);
-        *(.text .text.* .gnu.linkonce.t.*)
+        
+
+        /* 1. Сначала собираем все литералы из всех входных файлов */
+        *(.literal .text.literal .literal.* .text.literal.*)
+
+        /* 2. Затем сразу после них размещаем сам код */
+        *(.text .text.*)
+
+        
         . = ALIGN(4);
     }
 

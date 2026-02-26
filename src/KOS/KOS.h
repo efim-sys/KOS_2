@@ -19,11 +19,16 @@
 
 #include "display.h"
 
-#include "../launcher/export.h"
-
-
-
-
+enum {
+  BTN_UP = 0,
+  BTN_DOWN,
+  BTN_BOOT,
+  JOY_UP,
+  JOY_DOWN,
+  JOY_LEFT,
+  JOY_RIGHT,
+  JOY_CENTER
+};
 
 
 
@@ -114,6 +119,8 @@ namespace KOS{
     uint16_t *readImageBmp(fs::FS &fs, const char *filename, uint32_t *width = NULL, uint32_t *height = NULL);
 
     void readImageBmp(fs::FS &fs, const char *filename, uint32_t *width, uint32_t *height, uint16_t *addr);
+
+    int saveFramebuffer(uint16_t *framebuffer, uint32_t w, uint32_t h, const char* filename);
 
 
     

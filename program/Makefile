@@ -1,14 +1,14 @@
 asm:
-	/home/efim/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32-elf-gcc -mtext-section-literals -O0 -c -S test.c
+	/home/efim/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32-elf-gcc -mtext-section-literals -O3 -c -S test.c
 
 obj:
-	/home/efim/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32-elf-gcc -mtext-section-literals -O0 -c test.c
+	/home/efim/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32-elf-gcc -mtext-section-literals -O3 -c -o program.o test_rect.c
 
 link:
 	/home/efim/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-ld test.o  /home/efim/.platformio/packages/toolchain-xtensa-esp32s3/xtensa-esp32s3-elf/lib/libc.a /home/efim/.espressif/tools/xtensa-esp32s3-elf/esp-12.2.0_20230208/xtensa-esp32s3-elf/lib/gcc/xtensa-esp32s3-elf/12.2.0/libgcc.a -T custom.ld -o linked.o
 
 rlink:
-	/home/efim/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-ld test.o  /home/efim/.platformio/packages/toolchain-xtensa-esp32s3/xtensa-esp32s3-elf/lib/libc.a /home/efim/.espressif/tools/xtensa-esp32s3-elf/esp-12.2.0_20230208/xtensa-esp32s3-elf/lib/gcc/xtensa-esp32s3-elf/12.2.0/libgcc.a -T custom.ld -r -o program.elf
+	/home/efim/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-ld program.o  /home/efim/.platformio/packages/toolchain-xtensa-esp32s3/xtensa-esp32s3-elf/lib/libc.a /home/efim/.espressif/tools/xtensa-esp32s3-elf/esp-12.2.0_20230208/xtensa-esp32s3-elf/lib/gcc/xtensa-esp32s3-elf/12.2.0/libgcc.a -T custom.ld -r -o program.elf
 
 bin: 
 	/home/efim/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32-elf-objcopy -O binary linked.o linked.bin
