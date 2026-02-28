@@ -20,6 +20,8 @@ void free_canvas(Canvas *canvas);
 void set_pixel(Canvas *canvas, int x, int y, uint16_t color);
 uint16_t get_pixel(Canvas *canvas, int x, int y);
 
+void fill(Canvas *canvas, uint16_t color);
+
 /* Рисование примитивов */
 void draw_line(Canvas *canvas, int x1, int y1, int x2, int y2, uint16_t color);
 void draw_rect(Canvas *canvas, int x, int y, int w, int h, uint16_t color);

@@ -101,6 +101,7 @@ void setup() {
 
 
   apps = {
+    {"Launcher", &launcher::init, TFT_RED},
     {"Flappy bird", &FlappyBird::init, TFT_GREEN},
     {"Doodle jump", &doodle_jump::init, TFT_WHITE}, 
     #ifdef IPS169
@@ -119,10 +120,10 @@ void setup() {
     // {"Robot", &robot_control::init, NULL},
     {"CardReader mode", &cardReader::init, TFT_SKYBLUE},
     {"TV remote", &TVremote::init, TFT_MAROON},
-    {"Launcher", &launcher::init, TFT_RED},
+    
   };
   if(KOS::extRTC_IN) {  
-    apps.insert(apps.begin(), 
+    apps.insert(apps.begin()+1, 
       {"Clock", &watch::init, TFT_ORANGE}
     );
   }

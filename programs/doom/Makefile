@@ -18,12 +18,12 @@ OBJS    = $(SRCS:%.c=build/%.o)
 TARGET  = program.elf
 
 # Флаги
-CFLAGS  = -mtext-section-literals -O0 -c -I$(INC_DIR)
+CFLAGS  = -mtext-section-literals -O3 -c -I$(INC_DIR)
 LDFLAGS = -T $(LDSCRIPT) -r
 
 .PHONY: all clean copy objdump reloc symtab
 
-all: $(TARGET) copy
+all: $(TARGET) deploy
 
 # Сборка ELF из объектных файлов
 $(TARGET): $(OBJS)
@@ -46,10 +46,13 @@ reloc:
 	$(OBJDUMP) -r -s $(TARGET)
 
 symtab:
-	$(OBJDUMP) -t $(word 1, $(OBJS))
+	$(OBJDUMP) -t $(TARGET)
 
 clean:
 	rm -rf build $(TARGET)
 
 tio:
 	tio --map INLCRNL --baudrate 921600 /dev/ttyACM0
+
+deploy:
+	./elf_sender $(TARGET)

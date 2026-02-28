@@ -148,16 +148,6 @@ namespace KOS {
       }
     }
 
-
-
-
-
-
-
-
-
-
-
     void initButtons() {
         buttons[BTN_UP].    init(BTN_UP,      8,  (char *) "Button UP",       intHandler);
         buttons[BTN_DOWN].  init(BTN_DOWN,    9,  (char *) "Button DOWN",     intHandler);

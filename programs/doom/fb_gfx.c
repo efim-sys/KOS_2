@@ -117,3 +117,9 @@ void fill_circle(Canvas *canvas, int x0, int y0, int radius, uint16_t color) {
 uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
+
+void fill(Canvas *canvas, uint16_t color) {
+    for(int i = 0; i < canvas->height * canvas->width; i++) {
+        canvas->data[i] = color;
+    }
+}

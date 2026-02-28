@@ -25,4 +25,6 @@ struct exp_os {
     void* (*calloc)(size_t nmemb, size_t size);
 
     void (*free)(void* data);
+
+    uint8_t pin_num[24];
 };

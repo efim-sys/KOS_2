@@ -6,8 +6,22 @@ enum {
   JOY_DOWN,
   JOY_LEFT,
   JOY_RIGHT,
-  JOY_CENTER
+  JOY_CENTER,
+
+  LED_FLASH = 9,
+  SPEAKER = 10
 };
+
+// enum {
+//   PIN_BTN_UP = 8,
+//   PIN_BTN_DOWN = 9,
+//   PIN_BTN_BOOT = 0,
+//   PIN_JOY_UP = 5,
+//   PIN_JOY_DOWN = 7,
+//   PIN_JOY_LEFT = 15,
+//   PIN_JOY_RIGHT = 6,
+//   PIN_JOY_CENTER = 16
+// };
 
 #define LOW  0x0
 #define HIGH 0x1

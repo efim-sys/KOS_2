@@ -48,6 +48,7 @@ typedef struct {
     char *name;              // Имя секции
     uint8_t *alloc_addr;     // Адрес в ОЗУ, куда загружена секция (результат malloc)
     int is_loaded;           // Флаг: загружена ли секция в память
+    int original_index; 
 } SectionBuffer;
 
 typedef struct {
@@ -73,7 +74,7 @@ typedef struct {
 } ELFContext;
 
 // Прототипы функций
-int parse_elf(const char *filename, ELFContext *ctx);
+int parse_elf(ELFContext *ctx);
 int load_sections_to_memory(ELFContext *ctx);
 void apply_relocations(ELFContext *ctx);
 int process_relocation(Elf32_Rela *rela, SectionBuffer *target, 
@@ -176,14 +177,7 @@ SectionBuffer* find_section_by_index(ELFContext *ctx, int index) {
     return NULL;
 }
 
-int parse_elf(const char *filename, ELFContext *ctx) {
-    // Открываем файл
-    ctx->file = fopen(filename, "rb");
-    if (!ctx->file) {
-        USBSerial.printf("Failed to open file");
-        return -1;
-    }
-
+int parse_elf(ELFContext *ctx) {
     // Читаем ELF заголовок
     if (fread(&ctx->elf_header, sizeof(Elf32_Ehdr), 1, ctx->file) != 1) {
         USBSerial.printf("Failed to read ELF header\n");
@@ -266,6 +260,7 @@ int parse_elf(const char *filename, ELFContext *ctx) {
         buf->data = NULL;
         buf->alloc_addr = NULL;
         buf->is_loaded = 0;
+        buf->original_index = i;
         
         ctx->section_count++;
     }
@@ -421,43 +416,37 @@ int calculate_symbol_addresses(ELFContext *ctx) {
         SymbolInfo *sym = &ctx->symbols[i];
         
         if (sym->shndx == SHN_UNDEF) {
-            // Неопределенный символ (внешний) - адрес пока неизвестен
             sym->absolute_addr = NULL;
             USBSerial.printf("  %-30s: EXTERNAL (секция: UNDEF)\n", sym->name);
         } else if (sym->shndx == SHN_ABS) {
-            // Абсолютный символ - значение уже является адресом
             sym->absolute_addr = (uint8_t*)(uintptr_t)sym->value;
             USBSerial.printf("  %-30s: ABSOLUTE (адрес: %p)\n", sym->name, (void*)sym->absolute_addr);
         } else if (sym->shndx == SHN_COMMON) {
-            // COMMON символ (неинициализированные глобальные данные)
             sym->absolute_addr = NULL;
             USBSerial.printf("  %-30s: COMMON (размер: 0x%08x)\n", sym->name, sym->size);
         } else if (sym->shndx >= ctx->elf_header.e_shnum) {
-            // Некорректный индекс секции
             sym->absolute_addr = NULL;
-            USBSerial.printf("  %-30s: ERROR (некорректный индекс секции: %u)\n", 
-                   sym->name, sym->shndx);
+            USBSerial.printf("  %-30s: ERROR (некорректный индекс секции: %u)\n", sym->name, sym->shndx);
         } else {
-            // Обычный символ: ищем его секцию
+            // Получаем заголовок секции из исходной таблицы
             Elf32_Shdr *section_hdr = &ctx->section_headers[sym->shndx];
             char *section_name = &ctx->section_names[section_hdr->sh_name];
             
-            // Ищем секцию в нашем массиве загруженных секций
+            // Ищем загруженную секцию по оригинальному индексу
             SectionBuffer *loaded_section = NULL;
             for (int j = 0; j < ctx->section_count; j++) {
-                if (ctx->sections[j].header.sh_offset == section_hdr->sh_offset) {
+                if (ctx->sections[j].original_index == sym->shndx) {
                     loaded_section = &ctx->sections[j];
                     break;
                 }
             }
             
             if (loaded_section && loaded_section->is_loaded) {
-                // Вычисляем абсолютный адрес: адрес секции в памяти + смещение в секции
+                // Вычисляем абсолютный адрес: адрес секции в памяти + смещение символа
                 sym->absolute_addr = loaded_section->alloc_addr + sym->value;
                 USBSerial.printf("  %-30s: %p (секция: %s, смещение: 0x%08x)\n", 
                        sym->name, (void*)sym->absolute_addr, section_name, sym->value);
             } else {
-                // Секция не загружена в память
                 sym->absolute_addr = NULL;
                 USBSerial.printf("  %-30s: NOT LOADED (секция %s не загружена)\n", 
                        sym->name, section_name);
@@ -467,7 +456,6 @@ int calculate_symbol_addresses(ELFContext *ctx) {
     USBSerial.printf("\n");
     return 0;
 }
-
 uint8_t* get_symbol_absolute_addr(ELFContext *ctx, uint32_t sym_index) {
     if (sym_index < ctx->symbol_count) {
         return ctx->symbols[sym_index].absolute_addr;
@@ -614,13 +602,13 @@ int process_relocation(Elf32_Rela *rela, SectionBuffer *target,
 
     // Проверяем, что смещение находится в пределах секции
     if (offset >= target->size) {
-        printf("[ERROR] Релокация #%d: смещение 0x%08x вне границ секции %s (размер: 0x%08x)\n",
+        USBSerial.printf("[ERROR] Релокация #%d: смещение 0x%08x вне границ секции %s (размер: 0x%08x)\n",
                reloc_index, offset, target->name, target->size);
         return -1;
     }
     
     // Получаем указатель на место для применения релокации
-    uint32_t *location = (uint32_t*) target->alloc_addr + offset;
+    uint32_t *location = (uint32_t*) (target->alloc_addr + offset);
         
 
     addend = *((int32_t*)location);
@@ -630,31 +618,31 @@ int process_relocation(Elf32_Rela *rela, SectionBuffer *target,
     char *symbol_name = get_symbol_name(ctx, sym_index);
 
     
-    printf("[RELOCATION #%d]\n", reloc_index);
-    printf("  Тип: (%u)\n", type);
-    printf("  Секция: %s (адрес в ОЗУ: %p, размер: 0x%08zx)\n", 
+    USBSerial.printf("[RELOCATION #%d]\n", reloc_index);
+    USBSerial.printf("  Тип: (%u)\n", type);
+    USBSerial.printf("  Секция: %s (адрес в ОЗУ: %p, размер: 0x%08zx)\n", 
            target->name, (void*)target->alloc_addr, target->size);
-    printf("  Смещение в секции: 0x%08x\n", offset);
-    printf("  Адрес релокации в ОЗУ: %p\n", (void*)location);
-    printf("  Символ: %s (индекс: %u, адрес: %p)\n", 
+    USBSerial.printf("  Смещение в секции: 0x%08x\n", offset);
+    USBSerial.printf("  Адрес релокации в ОЗУ: %p\n", (void*)location);
+    USBSerial.printf("  Символ: %s (индекс: %u, адрес: %p)\n", 
            symbol_name, sym_index, (void*)symbol_addr);
-    printf("  Адденд: 0x%08x (%d)\n", addend, addend);
+    USBSerial.printf("  Адденд: 0x%08x (%d)\n", addend, addend);
     
     // Для неразрешенных символов (NULL) показываем предупреждение
     if (symbol_addr == NULL && sym_index != 0) {
-        printf("  ВНИМАНИЕ: Символ не разрешен (адрес = NULL). Возможно, внешняя ссылка.\n");
+        USBSerial.printf("  ВНИМАНИЕ: Символ не разрешен (адрес = NULL). Возможно, внешняя ссылка.\n");
         return -1; // Не применяем релокацию для неразрешенных символов
     }
     
     // Абсолютная 32-битная релокация: S + A
     uint32_t value = (uint32_t)symbol_addr + addend;
-    printf("  Формула: S + A = %p + 0x%08x\n", (void*)symbol_addr, addend);
-    printf("  Результат: 0x%08x\n", value);
-    printf("  Записываем 0x%08x по адресу %p\n", 
+    USBSerial.printf("  Формула: S + A = %p + 0x%08x\n", (void*)symbol_addr, addend);
+    USBSerial.printf("  Результат: 0x%08x\n", value);
+    USBSerial.printf("  Записываем 0x%08x по адресу %p\n", 
             value, (void*)location);
     *location = value;    
     
-    printf("\n");
+    USBSerial.printf("\n");
 
     return 0;
 }
@@ -880,14 +868,79 @@ void* find_symbol(ELFContext *ctx, const char* symbol_name) {
     return NULL;
 }
 
+#include "esp_rom_crc.h"
+
+#define RAM_DEPLOY
+
 int start_elf(const char filename[], exp_os* os) {
     ELFContext ctx = {0};
     
     USBSerial.printf("Прототип загрузчика ELF приложений для Xtensa (ESP32)\n");
     USBSerial.printf("Файл: %s\n\n", filename);
+
+    #ifndef RAM_DEPLOY
+    // Открываем файл
+    ctx.file = fopen(filename, "rb");
+    if (!ctx.file) {
+        USBSerial.printf("Failed to open file");
+        return 1;
+    }
+    #else
+    display.clear(TFT_BLACK);
+
+    while(USBSerial.available() > 0) USBSerial.read();
+
+    if (!psramInit()) {
+        USBSerial.println("PSRAM не найдена! Проверьте настройки сборки.");
+        return 1;
+    }
+
+
+    // 1. Ждем заголовок (8 байт: 4 размер + 4 CRC)
+    while (USBSerial.available() < 8) delay(1);
+    
+    uint32_t expectedSize, expectedCRC;
+    USBSerial.readBytes((char*)&expectedSize, 4);
+    USBSerial.readBytes((char*)&expectedCRC, 4);
+
+    uint8_t* buffer = (uint8_t*)ps_malloc(expectedSize);
+    if (!buffer) { USBSerial.println("PSRAM Full"); return 1; }
+
+    int lineY = 0;
+
+    // 2. Прием данных
+    uint32_t received = 0;
+    while (received < expectedSize) {
+        if (USBSerial.available()) {
+            buffer[received++] = USBSerial.read();
+            if((received % (expectedSize / display.height())) == 0) {
+                display.drawFastHLine(0, lineY++, display.width(), TFT_GREEN);
+            }
+        }
+    }
+
+    // 3. Проверка контрольной суммы
+    // Используем встроенную функцию esp_rom_crc32_le
+    uint32_t actualCRC = esp_rom_crc32_le(0, buffer, expectedSize);
+    FILE* vFile;
+
+    if (actualCRC == expectedCRC) {
+        USBSerial.printf("\n[OK] CRC совпал: 0x%08X\n", actualCRC);
+        vFile = fmemopen(buffer, expectedSize, "r");
+        // Работа с файлом...
+    } else {
+        USBSerial.printf("\n[ERROR] CRC mismatch! Ожидали: 0x%08X, получили: 0x%08X\n", expectedCRC, actualCRC);
+        free(buffer);
+
+        return 1;
+    }
+
+    ctx.file = vFile;
+
+    #endif
     
     // 1. Парсим ELF файл
-    if (parse_elf(filename, &ctx) != 0) {
+    if (parse_elf(&ctx) != 0) {
         USBSerial.printf("Ошибка при разборе ELF файла\n");
         return 1;
     }
@@ -943,11 +996,17 @@ int start_elf(const char filename[], exp_os* os) {
 
     USBSerial.printf("Программа будет выполнена сейчас:\n");
 
+    vTaskDelay(100);
+
     int ret = fn_main(os);
 
     USBSerial.printf("Выполнение окончено, оно возвратило: %d\n", ret);
     
     cleanup(&ctx);
+
+    #ifdef RAM_DEPLOY
+    free(buffer);
+    #endif
 
     return ret;
 }
@@ -1006,6 +1065,13 @@ namespace launcher {
         os.malloc = malloc;
         os.calloc = calloc;
         os.free = free;
+
+        for (int i = 0; i < 8; i++) {
+            os.pin_num[i] = buttons[i].pin;
+        }
+
+        os.pin_num[9] = LED_BUILTIN;
+        os.pin_num[10] = 1; // Speaker
 
         KOS::initSD();
 
