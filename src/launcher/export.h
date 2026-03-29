@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 struct exp_os {
     void (*putc)(char);
@@ -27,4 +28,18 @@ struct exp_os {
     void (*free)(void* data);
 
     uint8_t pin_num[24];
+
+    FILE* (*fopen)(const char* filename, const char* mode);
+
+    void* (*ps_malloc)(size_t size);
+
+    int	(*fseek) (FILE *, long, int);
+    size_t	(*fread) (void *__restrict, size_t _size, size_t _n, FILE *__restrict);
+    int	(*fclose) (FILE *);
+
+    long	(*ftell) ( FILE *);
+
+    uint32_t (*rand)(void);
+
+    size_t	(*fwrite) (const void *__restrict , size_t _size, size_t _n, FILE *);
 };

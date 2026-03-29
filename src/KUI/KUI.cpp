@@ -241,6 +241,7 @@ namespace KUI {
     TaskHandle_t taskHandleScreenUpdate;
 
     void initWindow() {
+        
         if(!updateNeeded) updateNeeded = xSemaphoreCreateBinary();
 
         requestWindowUpdate();
@@ -292,6 +293,9 @@ namespace KUI {
 
         KOS::onKeyRelease(BTN_UP, [](uint8_t k) {KUI::scrollVelocity = 0;});
         KOS::onKeyRelease(BTN_DOWN, [](uint8_t k) {KUI::scrollVelocity = 0;});
+
+        KUI::activeElement = 0;
+        KUI::scrollY = 0;
     }
 
     void terminateWindow(bool resetPosition) {

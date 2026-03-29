@@ -16,12 +16,17 @@
 #define M_PI 3.14159265359f 
 #define sign(f) ((f > 0) ? 1 : -1)
 
+#define min(a, b) ((a) < (b) ? (a) : (b))
+#define max(a, b) ((a) > (b) ? (a) : (b))
+
+float FOV = M_PI/2;
+
 float norm_speed = 0.1f;
 uint8_t d_turn_speed = 1;
 
 #define d_angle_max 32 // 32 rotation positions
 
-#define f_angle(d) (d * 2.0f * M_PI / d_angle_max)
+#define f_angle(d) ((float) d * 2.0f * M_PI / (float) d_angle_max)
 
 struct exp_os *os;
 Canvas canvas;
@@ -40,7 +45,7 @@ enum Wall_id_t {
     PORTRAIT_WALL = 11
 };
 
-void castRay(Intersection *intersection, float x0, float y0, float nx, float ny);
+void castRay(Intersection *intersection, const uint8_t *level,float x0, float y0, float nx, float ny);
 
 void draw_grid_2D(const uint8_t* level) {
     for(int y = 0; y < LEVEL_H; y ++) {
@@ -64,28 +69,28 @@ void draw_grid_2D(const uint8_t* level) {
     }
 }
 
-void draw_player_2D(const Player_t *player) {
+void draw_player_2D(const Player_t *player, const uint8_t* level) {
     int display_x = player->x*RECT_SIZE_2D;
     int display_y = player->y*RECT_SIZE_2D;
 
     fill_circle(&canvas, display_x, display_y, 5, player->color);
 
-    // draw_line(&canvas, display_x, display_y, 
-    //     display_x + cosf(f_angle(player->d_angle)) * 20,
-    //     display_y + sinf(f_angle(player->d_angle)) * 20,
-    //     player->color);
-
     Intersection intersection;
 
-    castRay(&intersection, player->x, player->y, 
-        cosf(f_angle(player->d_angle)),             // Normal x
-        sinf(f_angle(player->d_angle))              // Normal y
-    );
+    float a = f_angle(player->d_angle);
 
-    draw_line(&canvas, display_x, display_y, 
-        display_x + intersection.x * 20,
-        display_y + intersection.y * 20,
-        player->color);
+    for(float da = -FOV/2; da < FOV/2; da += FOV/canvas.width) {
+        castRay(&intersection, level, player->x, player->y, 
+            cosf(a+da),             // Normal x
+            sinf(a+da)              // Normal y
+        );
+
+        draw_line(&canvas, display_x, display_y, 
+            intersection.x * RECT_SIZE_2D,
+            intersection.y * RECT_SIZE_2D,
+            player->color
+        );
+    }
 }
 
 void render_2D(const uint8_t *level, const Player_t *players) {
@@ -96,7 +101,7 @@ void render_2D(const uint8_t *level, const Player_t *players) {
     const Player_t *next_player = players;
 
     while(next_player) {
-        draw_player_2D(next_player);
+        draw_player_2D(next_player, level);
         next_player = next_player -> next;
     }
 }
@@ -142,14 +147,56 @@ void apply_speed(Player_t * players) {
     }
 }
 
-void castRay(Intersection *intersection, float x0, float y0, float nx, float ny) {
+void castRay(Intersection *intersection, const uint8_t* level, float x0, float y0, float nx, float ny) {
+    int map_x = floorf(x0);
+    int map_y = floorf(y0);
+
+    float delta_dist_x = (nx == 0) ? 1e30f : fabsf(1.0f / nx);
+    float delta_dist_y = (ny == 0) ? 1e30f : fabsf(1.0f / ny);
+    
     float side_dst_x, side_dst_y;
+    int step_x = sign(nx);
+    int step_y = sign(ny);
 
-    side_dst_x = ((sign(nx) == 1) ? ceilf(nx) : floorf(nx)) - x0;
-    side_dst_y = ((sign(ny) == 1) ? ceilf(ny) : floorf(ny)) - y0;
+    if (nx < 0) side_dst_x = (x0 - map_x) * delta_dist_x;
+    else side_dst_x = (map_x + 1.0f - x0) * delta_dist_x;
 
-    intersection->x = x0 + side_dst_x;
-    intersection->y = y0 + side_dst_y;
+    if (ny < 0) side_dst_y = (y0 - map_y) * delta_dist_y;
+    else side_dst_y = (map_y + 1.0f - y0) * delta_dist_y;
+
+
+    int hit = 0;
+    int side = 0; // 0 для X-стен, 1 для Y-стен
+    int max_depth = 50; // Ограничитель, чтобы не зависнуть
+
+    while (hit == 0 && max_depth > 0) {
+        // Прыгаем в следующую клетку в зависимости от того, какая граница ближе
+        if (side_dst_x < side_dst_y) {
+            side_dst_x += delta_dist_x;
+            map_x += step_x;
+            side = 0;
+        } else {
+            side_dst_y += delta_dist_y;
+            map_y += step_y;
+            side = 1;
+        }
+
+        // ПРОВЕРКА СТОЛКНОВЕНИЯ
+        // Замените worldMap[mapX][mapY] на вашу функцию проверки стен
+        if (map_x < 0 || map_x >= LEVEL_W || map_y < 0 || map_y >= LEVEL_H) break;
+
+        if (cell(level, map_x, map_y) > 0) {
+            hit = 1;
+        }
+        max_depth--;
+    }
+    
+    float distance;
+    if (side == 0) distance = (side_dst_x - delta_dist_x);
+    else          distance = (side_dst_y - delta_dist_y);
+
+    intersection->x = x0 + nx * distance;
+    intersection->y = y0 + ny * distance;
 }
 
 
@@ -173,9 +220,9 @@ int main(struct exp_os* _os) {
 
     Player_t* players = NULL;
     add_player(&players, 2.5f, 3.5f, 0.0f, COLOR_GREEN);
-    add_player(&players, 4.5f, 5.5f, 0.0f, COLOR_RED);
-    add_player(&players, 5.5f, 5.5f, 0.0f, COLOR_CYAN);
-    add_player(&players, 3.5f, 5.5f, 0.0f, COLOR_NAVY);
+    // add_player(&players, 4.5f, 5.5f, 0.0f, COLOR_RED);
+    // add_player(&players, 5.5f, 5.5f, 0.0f, COLOR_CYAN);
+    // add_player(&players, 3.5f, 5.5f, 0.0f, COLOR_NAVY);
 
     os->printf("players = %p\n", players);
 
@@ -185,7 +232,7 @@ int main(struct exp_os* _os) {
         set_speed_btn(main_player);
         apply_speed(players);
 
-        os->printf("Main_player: x=%f y=%f angle=%f\n", main_player->x, main_player->y, f_angle(main_player->d_angle));
+        // os->printf("Main_player: x=%f y=%f angle=%f\n", main_player->x, main_player->y, f_angle(main_player->d_angle));
 
         render_2D(level, players);
 

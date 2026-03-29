@@ -1,0 +1,1 @@
+void CGM_init();

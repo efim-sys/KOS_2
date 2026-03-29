@@ -1,3 +1,5 @@
+#pragma once
+
 enum {
   BTN_UP = 0,
   BTN_DOWN,

@@ -870,7 +870,6 @@ void* find_symbol(ELFContext *ctx, const char* symbol_name) {
 
 #include "esp_rom_crc.h"
 
-#define RAM_DEPLOY
 
 int start_elf(const char filename[], exp_os* os) {
     ELFContext ctx = {0};
@@ -878,14 +877,19 @@ int start_elf(const char filename[], exp_os* os) {
     USBSerial.printf("Прототип загрузчика ELF приложений для Xtensa (ESP32)\n");
     USBSerial.printf("Файл: %s\n\n", filename);
 
-    #ifndef RAM_DEPLOY
+    bool ram_deploy = digitalRead(buttons[BTN_UP].pin);
+
+    uint8_t* buffer;
+
+    if(! ram_deploy) {
     // Открываем файл
     ctx.file = fopen(filename, "rb");
     if (!ctx.file) {
         USBSerial.printf("Failed to open file");
         return 1;
     }
-    #else
+    }
+    else {
     display.clear(TFT_BLACK);
 
     while(USBSerial.available() > 0) USBSerial.read();
@@ -903,7 +907,7 @@ int start_elf(const char filename[], exp_os* os) {
     USBSerial.readBytes((char*)&expectedSize, 4);
     USBSerial.readBytes((char*)&expectedCRC, 4);
 
-    uint8_t* buffer = (uint8_t*)ps_malloc(expectedSize);
+    buffer = (uint8_t*)ps_malloc(expectedSize);
     if (!buffer) { USBSerial.println("PSRAM Full"); return 1; }
 
     int lineY = 0;
@@ -937,7 +941,7 @@ int start_elf(const char filename[], exp_os* os) {
 
     ctx.file = vFile;
 
-    #endif
+    }
     
     // 1. Парсим ELF файл
     if (parse_elf(&ctx) != 0) {
@@ -1004,9 +1008,9 @@ int start_elf(const char filename[], exp_os* os) {
     
     cleanup(&ctx);
 
-    #ifdef RAM_DEPLOY
-    free(buffer);
-    #endif
+    if(ram_deploy) {
+        free(buffer);
+    }
 
     return ret;
 }
@@ -1065,6 +1069,15 @@ namespace launcher {
         os.malloc = malloc;
         os.calloc = calloc;
         os.free = free;
+        os.fopen = fopen;
+
+        os.ps_malloc = ps_malloc;
+        os.fread = fread;
+        os.fseek = fseek;
+        os.fclose = fclose;
+        os.ftell = ftell;
+        os.rand = esp_random;
+        os.fwrite = fwrite;
 
         for (int i = 0; i < 8; i++) {
             os.pin_num[i] = buttons[i].pin;
@@ -1075,7 +1088,7 @@ namespace launcher {
 
         KOS::initSD();
 
-        int ret  = start_elf("/sdcard/program.elf", &os);
+        int ret  = start_elf("/spiffs/program.elf", &os);
 
         for(int i = 0; i < 10; i ++) {
             USBSerial.printf("ОНО завершилось с кодом: %d\n", ret);
@@ -1085,6 +1098,6 @@ namespace launcher {
     }
 
     void init() {
-        xTaskCreatePinnedToCore(main, "BIN launcher", 32768, NULL, 1, NULL, 1);
+        xTaskCreatePinnedToCore(main, "BIN launcher", 65536, NULL, 1, NULL, 1);
     }
 }

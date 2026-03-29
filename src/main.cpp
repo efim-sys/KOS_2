@@ -21,6 +21,7 @@
 #include "calendar/main.h"
 #include "clock/main.h"
 
+#include "CGM/CGM.h"
 
 
 
@@ -101,7 +102,8 @@ void setup() {
 
 
   apps = {
-    {"Launcher", &launcher::init, TFT_RED},
+    {"CGM", CGM_init, TFT_WHITE}, 
+    {"Wolfenstein 3D", &launcher::init, TFT_BLUE},
     {"Flappy bird", &FlappyBird::init, TFT_GREEN},
     {"Doodle jump", &doodle_jump::init, TFT_WHITE}, 
     #ifdef IPS169
