@@ -35,6 +35,7 @@ void set_sender_menu() {
         KUI::Element(ELEMENT_TEXT, "Sugar=" + String(targetMgdl) + "mg/dL", NULL, TFT_GREEN, NULL),
         KUI::Element(ELEMENT_BUTTON, "+", NULL, TFT_GREEN, [](){ targetMgdl++; set_sender_menu(); }),
         KUI::Element(ELEMENT_BUTTON, "-", NULL, TFT_RED, [](){ targetMgdl--; set_sender_menu(); }),
+        KUI::Element(ELEMENT_SWITCH, "Autosleep", NULL, TFT_GOLD, NULL, &fonts::DejaVu18, &KOS::autoSleep::enable)
     };
     KUI::requestWindowUpdate();
 }
@@ -111,17 +112,17 @@ void CGM_sender() {
     }
 }
 
-// ======================== Receiver ========================
-#define MAX_SCAN_DEVICES 50
+#define MAX_SCAN_DEVICES 100   // увеличено для хранения всех устройств
 
 struct DeviceInfo {
     String addressStr;
     String name;
     bool isCGM;
+    int rssi;                   // добавлен для возможного отображения
 };
 
-DeviceInfo cgmDevices[MAX_SCAN_DEVICES];
-int cgmCount = 0;
+DeviceInfo devices[MAX_SCAN_DEVICES];
+int deviceCount = 0;            // переименовано вместо cgmCount
 
 SemaphoreHandle_t xDeviceSelectedSemaphore = NULL;
 SemaphoreHandle_t xRescanSemaphore = NULL;
@@ -143,26 +144,32 @@ void onRescan() {
     }
 }
 
+int lastRSSI = 0;   // хранит RSSI текущего подключённого устройства
+
 void buildDeviceList() {
     KUI::window.clear();
-    KUI::window.push_back(KUI::Element(ELEMENT_TEXT, "Select CGM Sensor:", NULL, TFT_YELLOW, NULL));
+    KUI::window.push_back(KUI::Element(ELEMENT_TEXT, "Select BLE device:", NULL, TFT_YELLOW, NULL));
 
-    if (cgmCount == 0) {
-        KUI::window.push_back(KUI::Element(ELEMENT_TEXT, "No CGM sensors found", NULL, TFT_RED, NULL));
+    if (deviceCount == 0) {
+        KUI::window.push_back(KUI::Element(ELEMENT_TEXT, "No devices found", NULL, TFT_RED, NULL));
     } else {
-        for (int i = 0; i < cgmCount; i++) {
-            String displayName = cgmDevices[i].name;
-            if (displayName == "") displayName = cgmDevices[i].addressStr;
-            KUI::window.push_back(KUI::Element(ELEMENT_BUTTON, displayName, NULL, TFT_WHITE, onDeviceSelect));
+        for (int i = 0; i < deviceCount; i++) {
+            String displayName = devices[i].name;
+            if (displayName == "") displayName = devices[i].addressStr;
+            if (devices[i].isCGM) {
+                displayName += " [CGM]";
+            }
+            // Цвет: зелёный для CGM, белый для остальных
+            uint16_t btnColor = devices[i].isCGM ? TFT_GREEN : TFT_WHITE;
+            KUI::window.push_back(KUI::Element(ELEMENT_BUTTON, displayName, NULL, btnColor, onDeviceSelect));
         }
     }
     KUI::window.push_back(KUI::Element(ELEMENT_BUTTON, "RESCAN", NULL, TFT_ORANGE, onRescan));
-
     KUI::requestWindowUpdate();
 }
 
 void performScan() {
-    cgmCount = 0;
+    deviceCount = 0;
     KUI::window = { KUI::Element(ELEMENT_TEXT, "Scanning for 5 seconds...", NULL, TFT_WHITE, NULL) };
     KUI::requestWindowUpdate();
 
@@ -171,19 +178,21 @@ void performScan() {
     BLEScanResults* pResults = pScan->start(5, false);
     int total = pResults->getCount();
 
-    for (int i = 0; i < total && cgmCount < MAX_SCAN_DEVICES; i++) {
+    for (int i = 0; i < total && deviceCount < MAX_SCAN_DEVICES; i++) {
         BLEAdvertisedDevice d = pResults->getDevice(i);
         String mData = d.getManufacturerData();
 
+        // Проверяем, является ли устройство CGM по manufacturer data
         bool isCGM = (mData.length() >= 2 && (uint8_t)mData[0] == 0x43 && (uint8_t)mData[1] == 0x47);
-        if (isCGM) {
-            cgmDevices[cgmCount].addressStr = d.getAddress().toString().c_str();
-            cgmDevices[cgmCount].name = d.getName().c_str();
-            cgmDevices[cgmCount].isCGM = true;
-            cgmCount++;
-        }
+
+        devices[deviceCount].addressStr = d.getAddress().toString().c_str();
+        devices[deviceCount].name = d.getName().c_str();
+        devices[deviceCount].isCGM = isCGM;
+        devices[deviceCount].rssi = d.getRSSI();
+        deviceCount++;
     }
 
+    // Освобождаем память результатов (если требуется)
     // delete pResults;
     buildDeviceList();
 }
@@ -201,12 +210,16 @@ void enableNotify(BLERemoteCharacteristic* pRemoteChar) {
     }
 }
 
+KUI::Canvas plot;
+
 void set_receiver_active_menu(String devName) {
     KUI::window = {
         KUI::Element(ELEMENT_TEXT, "Sensor: " + devName, NULL, TFT_CYAN, NULL),
         KUI::Element(ELEMENT_TEXT, "Sugar: " + String(lastSugar) + " mg/dL", NULL, (lastSugar > 180) ? TFT_RED : TFT_GREEN, NULL),
         KUI::Element(ELEMENT_TEXT, "Value: " + String(lastSugar / 18.1, 1) + " mmol/L", NULL, TFT_YELLOW, NULL),
-        KUI::Element(ELEMENT_BUTTON, "BACK / DISCONNECT", NULL, TFT_WHITE, [](){ ESP.restart(); })
+        KUI::Element(ELEMENT_TEXT, "RSSI: " + String(lastRSSI) + " dBm", NULL, TFT_WHITE, NULL),   // новое поле
+        KUI::Element(ELEMENT_BUTTON, "BACK / DISCONNECT", NULL, TFT_WHITE, [](){ ESP.restart(); }),
+        KUI::Element(ELEMENT_SWITCH, "Autosleep", NULL, TFT_GOLD, NULL, &fonts::DejaVu18, &KOS::autoSleep::enable),
     };
     KUI::requestWindowUpdate();
 }
@@ -226,7 +239,15 @@ void CGM_receiver() {
 
         while (true) {
             if (xSemaphoreTake(xDeviceSelectedSemaphore, 0) == pdTRUE) {
-                if (selectedDeviceIdx >= 0 && selectedDeviceIdx < cgmCount) {
+                if (selectedDeviceIdx >= 0 && selectedDeviceIdx < deviceCount) {
+                    // Если выбрано не CGM – выводим предупреждение, но продолжаем
+                    if (!devices[selectedDeviceIdx].isCGM) {
+                        USBSerial.println("Warning: Selected device is not a CGM sensor. Attempting to connect anyway...");
+                        KUI::window = { KUI::Element(ELEMENT_TEXT, "Warning: Not a CGM device!\nTrying to connect...", NULL, TFT_RED, NULL) };
+                        KUI::requestWindowUpdate();
+                        delay(2000);
+                        // Не прерываем выполнение, идём на подключение
+                    }
                     break;
                 }
                 performScan();
@@ -242,9 +263,15 @@ void CGM_receiver() {
             delay(100);
         }
 
-        String devName = cgmDevices[selectedDeviceIdx].name;
-        if (devName == "") devName = cgmDevices[selectedDeviceIdx].addressStr;
-        String devAddressStr = cgmDevices[selectedDeviceIdx].addressStr;
+        String devName = devices[selectedDeviceIdx].name;
+        if (devName == "") devName = devices[selectedDeviceIdx].addressStr;
+        String devAddressStr = devices[selectedDeviceIdx].addressStr;
+
+        // После выбора устройства сохраняем его RSSI
+        lastRSSI = devices[selectedDeviceIdx].rssi;
+
+        KUI::activeElement = 0;
+        KUI::scrollY = 0;
 
         KUI::window = { KUI::Element(ELEMENT_TEXT, "Connecting to " + devName + "...", NULL, TFT_CYAN, NULL) };
         KUI::requestWindowUpdate();
@@ -275,6 +302,21 @@ void CGM_receiver() {
 
         enableNotify(pCr);
 
+        // Добавляем запись CCCD для второй характеристики (Service Changed)
+        BLERemoteCharacteristic* pServiceChanged = pSvc->getCharacteristic(BLEUUID("00002a05-0000-1000-8000-00805f9b34fb"));
+        if (pServiceChanged && pServiceChanged->canNotify()) {
+            BLERemoteDescriptor* pDesc = pServiceChanged->getDescriptor(BLEUUID((uint16_t)0x2902));
+            if (pDesc) {
+                uint8_t val[] = {0x01, 0x00};
+                pDesc->writeValue(val, 2);
+                USBSerial.println("CCCD written to Service Changed characteristic");
+            } else {
+                USBSerial.println("Failed to get CCCD for Service Changed");
+            }
+        } else {
+            USBSerial.println("Service Changed characteristic not found or cannot notify");
+        }
+
         pCr->registerForNotify([](BLERemoteCharacteristic* c, uint8_t* d, size_t l, bool n) {
             if (l >= 5 && d[0] == 0x07) {
                 lastSugar = (d[4] * 2) + 20;
@@ -293,9 +335,13 @@ void CGM_receiver() {
 
 // ======================== Главная задача ========================
 void CGM_main(void *arg) {
+    plot.data = KOS::readImageBmp(SPIFFS, "/wall.bmp", (uint32_t*) &plot.width, (uint32_t*) &plot.height);
+    USBSerial.printf("data=%p width = %d height=%d\n\n", plot.data, plot.width, plot.height);
+
     KUI::window = {
         KUI::Element(ELEMENT_BUTTON, "Sender", NULL, TFT_YELLOW, [](){ selection = SELECT_SENDER; xSemaphoreGive(select_sm); }),
         KUI::Element(ELEMENT_BUTTON, "Receiver", NULL, TFT_GREEN, [](){ selection = SELECT_RECEIVER; xSemaphoreGive(select_sm); }),
+        KUI::Element(ELEMENT_IMAGE, "", &plot, 0, NULL)
     };
     KUI::initWindow();
     KOS::autoSleep::enable = false;

@@ -12,12 +12,20 @@ enum {
 };
 
 
+
 namespace KUI {
+
+    typedef struct {
+        uint16_t *data;      /* массив пикселей в формате RGB565 */
+        int width;           /* ширина в пикселях */
+        int height;          /* высота в пикселях */
+    } Canvas;
+
     struct Element {
         int8_t type = 0;
 
         String text;
-        uint16_t* image;
+        Canvas* image;
         uint16_t color = TFT_MAGENTA;
 
         const lgfx::v1::GFXfont* font = &fonts::DejaVu18;
@@ -28,7 +36,7 @@ namespace KUI {
 
         bool *switchPointer = NULL;
 
-        Element(int8_t _type, String _text, uint16_t* _image, uint16_t _color, void (*_onClick)(), const lgfx::v1::GFXfont* _font = &fonts::DejaVu18, bool* swPtr = NULL ) {
+        Element(int8_t _type, String _text, Canvas* _image, uint16_t _color, void (*_onClick)(), const lgfx::v1::GFXfont* _font = &fonts::DejaVu18, bool* swPtr = NULL ) {
             type = _type;
             text = _text;
             image = _image;

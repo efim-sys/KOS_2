@@ -138,13 +138,16 @@ namespace KUI {
         // USBSerial.printf("Drawing %d elements\n", window.size());
         for(int i = 0; i < window.size(); i++) {
             // USBSerial.println(window[i].color);
-
-            canvas.setTextDatum(textdatum_t::top_left);
-            canvas.setFont(window[i].font);
-
             int numOfStrings = 1;
-            for(int e = 0; e < window[i].text.length()-1; e++) {
-                if(window[i].text[e] == '\n') numOfStrings++;
+
+            if(window[i].type != ELEMENT_IMAGE) {
+                canvas.setTextDatum(textdatum_t::top_left);
+                canvas.setFont(window[i].font);
+
+                
+                for(int e = 0; e < window[i].text.length()-1; e++) {
+                    if(window[i].text[e] == '\n') numOfStrings++;
+                }
             }
 
             // int calculatedHeight = 12+canvas.fontHeight(&fonts::DejaVu18)*numOfStrings;
@@ -197,7 +200,16 @@ namespace KUI {
                 }
                 lastY+=calculatedHeight+3;
                 break;
-            
+            case ELEMENT_IMAGE:
+                // USBSerial.printf("Displaying ELEMENT IMAGE NOW\n\n\n\n\n");
+                realHeight = window[i].image->height;
+                // USBSerial.printf("realHeight = %d\n", realHeight);
+                if(window[i].image->data)
+                    canvas.pushImage(0, lastY, window[i].image->width, window[i].image->height, window[i].image->data);
+                else canvas.drawRect(0, lastY, window[i].image->width, window[i].image->height, TFT_RED);
+                if(i == activeElement) canvas.drawRect(0, lastY, window[i].image->width, window[i].image->height, TFT_ORANGE);
+                lastY += realHeight;
+                break;
             
             default:
                 break;
