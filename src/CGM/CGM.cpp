@@ -6,6 +6,8 @@
 #include <BLEServer.h>
 #include <BLE2902.h>
 
+
+
 #define SERVICE_UUID "00001000-1212-efde-1523-785feabcd123"
 #define CHARACTERISTIC_UUID "00001001-1212-efde-1523-785feabcd123"
 #define CCCD_UUID "00002902-0000-1000-8000-00805f9b34fb"
@@ -128,7 +130,7 @@ SemaphoreHandle_t xDeviceSelectedSemaphore = NULL;
 SemaphoreHandle_t xRescanSemaphore = NULL;
 int selectedDeviceIdx = -1;
 bool rescanRequested = false;
-volatile int lastSugar = 0;
+int lastSugar = 0;
 
 void onDeviceSelect() {
     selectedDeviceIdx = KUI::activeElement - 1;

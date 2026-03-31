@@ -36,7 +36,7 @@ namespace KUI {
 
         bool *switchPointer = NULL;
 
-        Element(int8_t _type, String _text, Canvas* _image, uint16_t _color, void (*_onClick)(), const lgfx::v1::GFXfont* _font = &fonts::DejaVu18, bool* swPtr = NULL ) {
+        Element(int8_t _type, String _text, Canvas* _image, uint16_t _color, void (*_onClick)() = NULL, const lgfx::v1::GFXfont* _font = &fonts::DejaVu18, bool* swPtr = NULL ) {
             type = _type;
             text = _text;
             image = _image;

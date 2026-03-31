@@ -29,20 +29,10 @@
 
 struct Application {
   String name;
-
-  // const lgfx::rgb565_t* logo;
-  // int logoH = 80;
-  // int logoW = 80;
-
+  
   void (*function)();
 
   uint16_t color;
-
-  // Application(String _name, void (*_function)(), const lgfx::rgb565_t* _logo) {
-  //   function = _function;
-  //   logo = _logo;
-  //   name = _name;
-  // }
 };
 
 std::vector <Application> apps;
